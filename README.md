@@ -125,7 +125,68 @@ The script forces UTF-8 output encoding to handle Unicode gauge characters on Wi
 
 ---
 
-## Configuration
+## Customization
+
+Every segment is toggleable via environment variables. Set them in your shell profile, or add them to the `env` block in `~/.claude/settings.json`:
+
+```json
+{
+  "env": {
+    "CQB_PACE": "1",
+    "CQB_CONTEXT_SIZE": "1",
+    "CQB_COST": "1"
+  }
+}
+```
+
+### Available options
+
+| Variable | Default | Description |
+|---|---|---|
+| `CQB_TOKENS` | `1` (on) | Token counts (`↑50k ↓12k`) |
+| `CQB_RESET` | `1` (on) | Reset countdown (`(1h)`, `(2d)`) |
+| `CQB_DURATION` | `1` (on) | Session duration (`2m0s`) |
+| `CQB_BRANCH` | `1` (on) | Git branch name |
+| `CQB_CONTEXT_SIZE` | `0` (off) | Context window size label (`of 1M`) |
+| `CQB_PACE` | `0` (off) | Pace indicator (`+52%` / `-38%`) |
+| `CQB_COST` | `0` (off) | Session cost (`$0.05`) |
+
+### Preset examples
+
+**Maximal** — everything on:
+
+![Maximal statusline](assets/maximal.png)
+
+```json
+{ "env": { "CQB_PACE": "1", "CQB_CONTEXT_SIZE": "1", "CQB_COST": "1" } }
+```
+
+**Minimal** — just quota percentages:
+
+![Minimal statusline](assets/minimal.png)
+
+```json
+{ "env": { "CQB_TOKENS": "0", "CQB_RESET": "0", "CQB_DURATION": "0" } }
+```
+
+**Kitchen sink at critical** — when things get serious:
+
+![Kitchen sink statusline](assets/kitchen-sink.png)
+
+### What are the extra options?
+
+- **Pace indicator** (`CQB_PACE`) — compares your actual usage rate against even pacing across the window. `+52%` means you're well under pace (green, good). `-38%` means you're burning faster than sustainable (red, bad). Suppressed when within +/-10%.
+- **Context size** (`CQB_CONTEXT_SIZE`) — appends `of 1M` (or `of 200K`, etc.) next to the context remaining percentage.
+- **Cost** (`CQB_COST`) — shows the session's total API cost in USD.
+
+### Defaults
+
+Out of the box with zero config, you get:
+
+```
+◆ Opus │ my-project/main
+▰▰▰▰▱ 75% │ ↑50k ↓12k │ 5h: 80% (1h) │ 7d: 34% │ 2m0s
+```
 
 No configuration needed beyond the `statusLine` entry in settings.json. The plugin automatically:
 

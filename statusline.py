@@ -21,6 +21,17 @@ from pathlib import Path
 if sys.stdout.encoding != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8")
 
+# ── Configuration (env vars) ─────────────────────────────────────
+# Set these in your shell profile or in Claude Code's settings.json env block.
+# Values: "1" = show, "0" = hide
+SHOW_CONTEXT_SIZE = os.environ.get("CQB_CONTEXT_SIZE", "0") == "1"
+SHOW_TOKENS = os.environ.get("CQB_TOKENS", "1") == "1"
+SHOW_PACE = os.environ.get("CQB_PACE", "0") == "1"
+SHOW_RESET = os.environ.get("CQB_RESET", "1") == "1"
+SHOW_DURATION = os.environ.get("CQB_DURATION", "1") == "1"
+SHOW_BRANCH = os.environ.get("CQB_BRANCH", "1") == "1"
+SHOW_COST = os.environ.get("CQB_COST", "0") == "1"
+
 # ── Read stdin ──────────────────────────────────────────────────
 raw = sys.stdin.read().strip()
 if not raw:
@@ -348,7 +359,7 @@ else:
 line1_parts = [f"{C}{DIAMOND} {model}{N}"]
 
 if proj_name:
-    loc = f"{proj_name}/{branch}" if branch else proj_name
+    loc = f"{proj_name}/{branch}" if (branch and SHOW_BRANCH) else proj_name
     if len(loc) > 40:
         loc = loc[:39] + "\u2026"
     line1_parts.append(loc)
@@ -357,10 +368,13 @@ line1 = SEP.join(line1_parts)
 
 # Line 2: context gauge, quota, duration
 ctx_color = color_pct(ctx_pct_used)
-line2_parts = [f"{ctx_color}{gauge}{N} {ctx_remaining}%"]
+ctx_str = f"{ctx_color}{gauge}{N} {ctx_remaining}%"
+if SHOW_CONTEXT_SIZE:
+    ctx_str += f" of {ctx_label}"
+line2_parts = [ctx_str]
 
 # Token counts
-if in_tok or out_tok:
+if SHOW_TOKENS and (in_tok or out_tok):
     line2_parts.append(f"\u2191{compact(in_tok)} \u2193{compact(out_tok)}")
 
 # Quota
@@ -371,8 +385,13 @@ if usage:
     r5 = usage["r5"]
     r7 = usage["r7"]
 
-    line2_parts.append(f"5h: {remaining_pct_str(u5)}{format_reset(r5)}")
-    line2_parts.append(f"7d: {remaining_pct_str(u7)}{format_reset(r7) if u7 is not None and int(u7) >= 70 else ''}")
+    pace5 = pace_indicator(u5, r5, 300) if SHOW_PACE else ""
+    pace7 = pace_indicator(u7, r7, 10080) if SHOW_PACE else ""
+    reset5 = format_reset(r5) if SHOW_RESET else ""
+    reset7 = format_reset(r7) if (SHOW_RESET and u7 is not None and int(u7) >= 70) else ""
+
+    line2_parts.append(f"5h: {remaining_pct_str(u5)}{pace5}{reset5}")
+    line2_parts.append(f"7d: {remaining_pct_str(u7)}{pace7}{reset7}")
 
     # Extra usage (only show when 5h is nearly exhausted)
     if usage["extra_enabled"] and u5 is not None and int(u5) >= 80:
@@ -383,8 +402,13 @@ else:
     line2_parts.append(f"5h: {D}--{N}")
     line2_parts.append(f"7d: {D}--{N}")
 
+# Cost
+if SHOW_COST and cost_usd > 0:
+    line2_parts.append(f"{D}${cost_usd:.2f}{N}")
+
 # Duration
-line2_parts.append(f"{D}{format_duration(duration_ms)}{N}")
+if SHOW_DURATION:
+    line2_parts.append(f"{D}{format_duration(duration_ms)}{N}")
 
 line2 = SEP.join(line2_parts)
 
