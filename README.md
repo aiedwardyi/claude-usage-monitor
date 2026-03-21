@@ -1,4 +1,4 @@
-# claude-quota-bar
+# claude-usage-monitor
 
 A real-time statusline plugin for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) that shows your 5-hour and 7-day quota remaining percentages, context window usage, token counts, and reset countdowns — right in your terminal.
 
@@ -71,8 +71,8 @@ Never get surprised by rate limits again.
 **1. Clone the repo**
 
 ```bash
-git clone https://github.com/aiedwardyi/claude-quota-bar.git
-cd claude-quota-bar
+git clone https://github.com/aiedwardyi/claude-usage-monitor.git
+cd claude-usage-monitor
 ```
 
 **2. Add to Claude Code settings**
@@ -83,13 +83,13 @@ Open `~/.claude/settings.json` and add (or update) the `statusLine` block:
 {
   "statusLine": {
     "type": "command",
-    "command": "bash /path/to/claude-quota-bar/statusline.sh",
+    "command": "bash /path/to/claude-usage-monitor/statusline.sh",
     "padding": 0
   }
 }
 ```
 
-Replace `/path/to/claude-quota-bar` with the actual path where you cloned the repo.
+Replace `/path/to/claude-usage-monitor` with the actual path where you cloned the repo.
 
 **3. That's it.** Restart Claude Code and the statusline appears automatically.
 
@@ -218,4 +218,4 @@ MIT
 
 ## Contributing
 
-Issues and PRs welcome at [github.com/aiedwardyi/claude-quota-bar](https://github.com/aiedwardyi/claude-quota-bar).
+Issues and PRs welcome at [github.com/aiedwardyi/claude-usage-monitor](https://github.com/aiedwardyi/claude-usage-monitor).
