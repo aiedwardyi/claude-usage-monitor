@@ -4,6 +4,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import tempfile
 
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -89,6 +90,34 @@ def smoke_windows_launcher():
         raise AssertionError(f"unexpected statusline.cmd output:\n{proc.stdout}")
 
 
+def smoke_windows_launcher_path_fallback():
+    if os.name != "nt":
+        return
+
+    with tempfile.TemporaryDirectory() as tmp:
+        fake_bash = pathlib.Path(tmp) / "bash.cmd"
+        fake_bash.write_text("@echo off\r\necho Claude\r\n", encoding="utf-8")
+
+        env = os.environ.copy()
+        env["PATH"] = tmp + os.pathsep + env.get("PATH", "")
+        env["ProgramFiles"] = str(pathlib.Path(tmp) / "missing-program-files")
+        env["ProgramFiles(x86)"] = str(pathlib.Path(tmp) / "missing-program-files-x86")
+        env["LocalAppData"] = str(pathlib.Path(tmp) / "missing-local-app-data")
+
+        proc = subprocess.run(
+            ["cmd", "/c", str(STATUSLINE_CMD)],
+            input="",
+            text=True,
+            capture_output=True,
+            cwd=ROOT,
+            env=env,
+            timeout=20,
+        )
+        assert_ok(proc, "statusline.cmd path fallback")
+        if proc.stdout.strip() != "Claude":
+            raise AssertionError(f"unexpected statusline.cmd fallback output:\n{proc.stdout}")
+
+
 def shutil_which(name):
     paths = os.environ.get("PATH", "").split(os.pathsep)
     exts = [""]
@@ -109,6 +138,7 @@ def main():
     smoke_empty_stdin()
     smoke_unix_launcher()
     smoke_windows_launcher()
+    smoke_windows_launcher_path_fallback()
     print("smoke tests passed")
 
 
