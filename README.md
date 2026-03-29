@@ -159,6 +159,7 @@ Every segment is toggleable via environment variables. Set them in your shell pr
 | `CQB_CONTEXT_SIZE` | `0` | Show context size label such as `of 1M` |
 | `CQB_PACE` | `0` | Show pacing indicator |
 | `CQB_COST` | `0` | Show session cost |
+| `CQB_REMAINING` | `0` | Show remaining % instead of used % for quotas |
 
 ### Presets
 

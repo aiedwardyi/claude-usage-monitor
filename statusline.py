@@ -32,6 +32,7 @@ SHOW_RESET = os.environ.get("CQB_RESET", "1") == "1"
 SHOW_DURATION = os.environ.get("CQB_DURATION", "1") == "1"
 SHOW_BRANCH = os.environ.get("CQB_BRANCH", "1") == "1"
 SHOW_COST = os.environ.get("CQB_COST", "0") == "1"
+SHOW_REMAINING = os.environ.get("CQB_REMAINING", "0") == "1"
 
 # ── Read stdin ──────────────────────────────────────────────────
 raw = sys.stdin.read().strip()
@@ -164,12 +165,13 @@ def format_reset(minutes):
 
 
 def used_pct_str(used_pct):
-    """Format used % with color (matches Claude Desktop display)."""
+    """Format used or remaining % with color."""
     if used_pct is None or used_pct == "--":
         return "--"
     used = int(used_pct)
     c = color_pct(used)
-    return f"{c}{used}%{N}"
+    val = 100 - used if SHOW_REMAINING else used
+    return f"{c}{val}%{N}"
 
 
 def pace_indicator(used_pct, remain_min, window_min):
