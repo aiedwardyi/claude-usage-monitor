@@ -16,13 +16,17 @@ STATUSLINE_SH = ROOT / "statusline.sh"
 STATUSLINE_CMD = ROOT / "statusline.cmd"
 
 
-def run(command, stdin_text=""):
+def run(command, stdin_text="", extra_env=None):
     env = os.environ.copy()
     env["CQB_TOKENS"] = "0"
     env["CQB_RESET"] = "0"
     env["CQB_DURATION"] = "0"
     env["CQB_BRANCH"] = "0"
+    env["PYTHONIOENCODING"] = "utf-8"
     env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+    env.pop("CQB_BAR", None)
+    if extra_env:
+        env.update(extra_env)
     proc = subprocess.run(
         command,
         input=stdin_text,
@@ -31,6 +35,7 @@ def run(command, stdin_text=""):
         cwd=ROOT,
         env=env,
         timeout=20,
+        encoding="utf-8",
     )
     return proc
 
@@ -221,6 +226,66 @@ def smoke_windows_install_wrapper():
             raise AssertionError(f"unexpected install.ps1 command: {command}")
 
 
+def smoke_bar_toggle():
+    import re
+    import time as _time
+
+    payload = {
+        "model": {"display_name": "Opus"},
+        "context_window": {
+            "used_percentage": 25,
+            "context_window_size": 200000,
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+        },
+        "cost": {"total_cost_usd": 0, "total_duration_ms": 0},
+        "workspace": {"project_dir": str(ROOT)},
+    }
+    stdin = json.dumps(payload)
+    ansi_re = re.compile(r"\033\[[0-9;]*m")
+
+    # Write a temp cache so quota data is available
+    cache_file = os.path.join(tempfile.gettempdir(), "claude-sl-usage.json")
+    cache_backup = None
+    if os.path.exists(cache_file):
+        cache_backup = pathlib.Path(cache_file).read_text(encoding="utf-8")
+    cache_data = json.dumps({
+        "five_hour_used": 30,
+        "seven_day_used": 50,
+        "five_hour_reset_min": 120,
+        "seven_day_reset_min": 4320,
+        "extra_enabled": False,
+        "extra_used": 0,
+        "extra_limit": 0,
+        "fetched_at": _time.time(),
+    })
+    pathlib.Path(cache_file).write_text(cache_data, encoding="utf-8")
+
+    try:
+        # Bar off: count bar chars - only context gauge should have them
+        proc = run([sys.executable, str(STATUSLINE_PY)], stdin)
+        assert_ok(proc, "bar off")
+        clean = ansi_re.sub("", proc.stdout)
+        bar_off_count = clean.count("\u25b0") + clean.count("\u25b1")
+
+        # Bar on: should have more bar chars (context gauge + two quota bars)
+        proc = run([sys.executable, str(STATUSLINE_PY)], stdin, extra_env={"CQB_BAR": "1"})
+        assert_ok(proc, "bar on")
+        clean = ansi_re.sub("", proc.stdout)
+        bar_on_count = clean.count("\u25b0") + clean.count("\u25b1")
+
+        if bar_on_count <= bar_off_count:
+            raise AssertionError(
+                f"CQB_BAR=1 should add bar chars: off={bar_off_count}, on={bar_on_count}"
+            )
+    finally:
+        # Restore original cache
+        if cache_backup is not None:
+            pathlib.Path(cache_file).write_text(cache_backup, encoding="utf-8")
+        elif os.path.exists(cache_file):
+            os.unlink(cache_file)
+
+
 def main():
     smoke_statusline_py()
     smoke_empty_stdin()
@@ -229,6 +294,7 @@ def main():
     smoke_installer()
     smoke_unix_install_wrapper()
     smoke_windows_install_wrapper()
+    smoke_bar_toggle()
     print("smoke tests passed")
 
 

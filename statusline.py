@@ -33,6 +33,7 @@ SHOW_DURATION = os.environ.get("CQB_DURATION", "1") == "1"
 SHOW_BRANCH = os.environ.get("CQB_BRANCH", "1") == "1"
 SHOW_COST = os.environ.get("CQB_COST", "0") == "1"
 SHOW_REMAINING = os.environ.get("CQB_REMAINING", "0") == "1"
+SHOW_BAR = os.environ.get("CQB_BAR", "0") == "1"
 
 # ── Read stdin ──────────────────────────────────────────────────
 raw = sys.stdin.read().strip()
@@ -164,6 +165,7 @@ def format_reset(minutes):
     return f" {D}({m}m){N}"
 
 
+
 def used_pct_str(used_pct):
     """Format used or remaining % with color."""
     if used_pct is None or used_pct == "--":
@@ -171,7 +173,14 @@ def used_pct_str(used_pct):
     used = int(used_pct)
     c = color_pct(used)
     val = 100 - used if SHOW_REMAINING else used
-    return f"{c}{val}%{N}"
+    if SHOW_BAR:
+        filled = round(min(100, max(0, val)) / 100.0 * 5)
+        filled_chars = "\u25b0" * filled
+        empty_chars = "\u25b1" * (5 - filled)
+        bar = f"{c}{filled_chars}{empty_chars}{N} "
+    else:
+        bar = ""
+    return f"{bar}{c}{val}%{N}"
 
 
 def pace_indicator(used_pct, remain_min, window_min):

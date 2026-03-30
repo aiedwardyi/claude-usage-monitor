@@ -160,6 +160,7 @@ Every segment is toggleable via environment variables. Set them in your shell pr
 | `CQB_PACE` | `0` | Show pacing indicator |
 | `CQB_COST` | `0` | Show session cost |
 | `CQB_REMAINING` | `0` | Show remaining % instead of used % for quotas |
+| `CQB_BAR` | `0` | Show visual progress bar next to 5h/7d quotas |
 
 ### Presets
 
