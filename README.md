@@ -1,6 +1,7 @@
 <h1 align="center">claude-usage-monitor</h1>
 
 <p align="center">
+  <a href="https://github.com/aiedwardyi/claude-usage-monitor/stargazers"><img src="https://img.shields.io/github/stars/aiedwardyi/claude-usage-monitor?style=social" alt="GitHub Stars"></a>
   <a href="https://github.com/aiedwardyi/claude-usage-monitor/actions/workflows/smoke-tests.yml"><img src="https://github.com/aiedwardyi/claude-usage-monitor/actions/workflows/smoke-tests.yml/badge.svg" alt="Smoke Tests"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT License"></a>
 </p>
@@ -22,13 +23,13 @@
 ### Windows PowerShell
 
 ```powershell
-irm https://raw.githubusercontent.com/aiedwardyi/claude-usage-monitor/v0.1.1/install.ps1 | iex
+irm https://raw.githubusercontent.com/aiedwardyi/claude-usage-monitor/v0.1.2/install.ps1 | iex
 ```
 
 ### macOS / Linux
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/aiedwardyi/claude-usage-monitor/v0.1.1/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/aiedwardyi/claude-usage-monitor/v0.1.2/install.sh | bash
 ```
 
 ### What you get
@@ -52,7 +53,7 @@ Uses your existing Claude Code OAuth session. No extra API key or Python package
 ```bash
 git clone https://github.com/aiedwardyi/claude-usage-monitor.git
 cd claude-usage-monitor
-git switch --detach v0.1.1
+git switch --detach v0.1.2
 python install.py
 ```
 
@@ -194,7 +195,7 @@ Every segment is toggleable via environment variables. Set them in your shell pr
 ```bash
 git clone https://github.com/aiedwardyi/claude-usage-monitor.git
 cd claude-usage-monitor
-git switch --detach v0.1.1
+git switch --detach v0.1.2
 python install.py
 ```
 
