@@ -81,7 +81,7 @@ If you want to verify the launcher yourself before restarting Claude Code:
 | `▰▰▰▰▱ 75%` | Context window remaining |
 | `↑50k ↓12k` | Input and output tokens |
 | `5h: ▰▰▰▰▱ 80% (1h)` | 5-hour quota remaining with bar and reset countdown |
-| `7d: ▰▰▱▱▱ 34%` | 7-day quota remaining with bar |
+| `7d: ▰▰▱▱▱ 34% (2d)` | 7-day quota remaining with bar and reset countdown |
 | `2m0s` | Session duration |
 
 All three bars show remaining % - they start full (green) and drain toward empty (red) as you use more. Set `CQB_REMAINING=0` for used % instead.

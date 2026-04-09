@@ -405,7 +405,7 @@ if usage:
     pace5 = pace_indicator(u5, r5, 300) if SHOW_PACE else ""
     pace7 = pace_indicator(u7, r7, 10080) if SHOW_PACE else ""
     reset5 = format_reset(r5) if SHOW_RESET else ""
-    reset7 = format_reset(r7) if (SHOW_RESET and u7 is not None and int(u7) >= 70) else ""
+    reset7 = format_reset(r7) if SHOW_RESET else ""
 
     line2_parts.append(f"5h: {used_pct_str(u5)}{pace5}{reset5}")
     line2_parts.append(f"7d: {used_pct_str(u7)}{pace7}{reset7}")
