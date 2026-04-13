@@ -57,7 +57,7 @@ if (Test-Path $localInstaller) {
 }
 
 $repo = if ($env:CLAUDE_USAGE_MONITOR_REPO) { $env:CLAUDE_USAGE_MONITOR_REPO } else { "aiedwardyi/claude-usage-monitor" }
-$ref = if ($env:CLAUDE_USAGE_MONITOR_REF) { $env:CLAUDE_USAGE_MONITOR_REF } else { "v0.1.2" }
+$ref = if ($env:CLAUDE_USAGE_MONITOR_REF) { $env:CLAUDE_USAGE_MONITOR_REF } else { "v0.1.3" }
 $rawBase = "https://raw.githubusercontent.com/$repo/$ref"
 $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("claude-usage-monitor-install-" + [System.Guid]::NewGuid().ToString("N"))
 

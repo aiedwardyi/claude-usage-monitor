@@ -11,6 +11,7 @@ the system temp directory for 5 minutes.
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -34,6 +35,7 @@ SHOW_BRANCH = os.environ.get("CQB_BRANCH", "1") == "1"
 SHOW_COST = os.environ.get("CQB_COST", "0") == "1"
 SHOW_REMAINING = os.environ.get("CQB_REMAINING", "1") == "1"
 SHOW_BAR = os.environ.get("CQB_BAR", "1") == "1"
+MAX_WIDTH = int(os.environ.get("CQB_MAX_WIDTH", "60"))
 
 # ── Read stdin ──────────────────────────────────────────────────
 raw = sys.stdin.read().strip()
@@ -54,6 +56,13 @@ Y = "\033[33m"   # yellow
 R = "\033[31m"   # red
 D = "\033[2m"    # dim
 N = "\033[0m"    # reset
+
+_ANSI_RE = re.compile(r"\033\[[0-9;]*m")
+
+
+def strip_ansi(text):
+    """Remove ANSI escape sequences to measure visible width."""
+    return _ANSI_RE.sub("", text)
 
 
 def color_pct(used_pct):
@@ -384,15 +393,19 @@ if proj_name:
 line1 = SEP.join(line1_parts)
 
 # Line 2: context gauge, quota, duration
+# Each segment is (text, priority) - lower priority number = more important (dropped last).
+# When the joined line exceeds MAX_WIDTH, the highest-numbered priorities are dropped first.
 ctx_color = color_pct(ctx_pct_used)
 ctx_str = f"{ctx_color}{gauge}{N} {ctx_remaining}%"
 if SHOW_CONTEXT_SIZE:
     ctx_str += f" of {ctx_label}"
-line2_parts = [ctx_str]
+
+line2_segments = []  # list of (text, priority)
+line2_segments.append((ctx_str, 2))
 
 # Token counts
 if SHOW_TOKENS and (in_tok or out_tok):
-    line2_parts.append(f"\u2191{compact(in_tok)} \u2193{compact(out_tok)}")
+    line2_segments.append((f"\u2191{compact(in_tok)} \u2193{compact(out_tok)}", 4))
 
 # Quota
 usage = read_cached_usage()
@@ -407,31 +420,39 @@ if usage:
     reset5 = format_reset(r5) if SHOW_RESET else ""
     reset7 = format_reset(r7) if SHOW_RESET else ""
 
-    line2_parts.append(f"5h: {used_pct_str(u5)}{pace5}{reset5}")
-    line2_parts.append(f"7d: {used_pct_str(u7)}{pace7}{reset7}")
+    line2_segments.append((f"5h: {used_pct_str(u5)}{pace5}{reset5}", 1))
+    line2_segments.append((f"7d: {used_pct_str(u7)}{pace7}{reset7}", 1))
 
     # Extra usage (only show when 5h is nearly exhausted)
     if usage["extra_enabled"] and u5 is not None and int(u5) >= 80:
         eu = int(usage["extra_used"])
         el = int(usage["extra_limit"])
-        line2_parts.append(f"${eu / 100:.2f}/${el / 100:.2f}")
+        line2_segments.append((f"${eu // 100}/${el // 100}", 4))
 else:
     if not get_oauth_token():
-        line2_parts.append(f"5h: {D}no token{N}")
-        line2_parts.append(f"7d: {D}no token{N}")
+        line2_segments.append((f"5h: {D}no token{N}", 1))
+        line2_segments.append((f"7d: {D}no token{N}", 1))
     else:
-        line2_parts.append(f"5h: {D}--{N}")
-        line2_parts.append(f"7d: {D}--{N}")
+        line2_segments.append((f"5h: {D}--{N}", 1))
+        line2_segments.append((f"7d: {D}--{N}", 1))
 
 # Cost
 if SHOW_COST and cost_usd > 0:
-    line2_parts.append(f"{D}${cost_usd:.2f}{N}")
+    line2_segments.append((f"{D}${cost_usd:.2f}{N}", 4))
 
 # Duration
 if SHOW_DURATION:
-    line2_parts.append(f"{D}{format_duration(duration_ms)}{N}")
+    line2_segments.append((f"{D}{format_duration(duration_ms)}{N}", 3))
 
-line2 = SEP.join(line2_parts)
+# Drop lowest-priority segments until line fits within MAX_WIDTH
+def build_line(segments):
+    return SEP.join(text for text, _ in segments)
+
+line2 = build_line(line2_segments)
+while len(strip_ansi(line2)) > MAX_WIDTH and line2_segments:
+    worst = max(range(len(line2_segments)), key=lambda i: line2_segments[i][1])
+    line2_segments.pop(worst)
+    line2 = build_line(line2_segments)
 
 print(line1)
 print(line2)

@@ -23,13 +23,13 @@
 ### Windows PowerShell
 
 ```powershell
-irm https://raw.githubusercontent.com/aiedwardyi/claude-usage-monitor/v0.1.2/install.ps1 | iex
+irm https://raw.githubusercontent.com/aiedwardyi/claude-usage-monitor/v0.1.3/install.ps1 | iex
 ```
 
 ### macOS / Linux
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/aiedwardyi/claude-usage-monitor/v0.1.2/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/aiedwardyi/claude-usage-monitor/v0.1.3/install.sh | bash
 ```
 
 ### What you get
@@ -53,7 +53,7 @@ Uses your existing Claude Code OAuth session. No extra API key or Python package
 ```bash
 git clone https://github.com/aiedwardyi/claude-usage-monitor.git
 cd claude-usage-monitor
-git switch --detach v0.1.2
+git switch --detach v0.1.3
 python install.py
 ```
 
@@ -195,7 +195,7 @@ Every segment is toggleable via environment variables. Set them in your shell pr
 ```bash
 git clone https://github.com/aiedwardyi/claude-usage-monitor.git
 cd claude-usage-monitor
-git switch --detach v0.1.2
+git switch --detach v0.1.3
 python install.py
 ```
 

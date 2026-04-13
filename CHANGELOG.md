@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.1.3
+
+### Fixed
+- Status line truncated when extra usage is active - 5h section and context gauge were silently dropped when line exceeded display width (#6)
+- Extra usage display now shows compact dollar amounts ($64/$105 instead of $63.82/$105.00)
+
+### Added
+- `CQB_MAX_WIDTH` env var to control maximum status line width (default 60) - segments are dropped by priority when the line overflows
+
 ## v0.1.2
 
 ### Changed

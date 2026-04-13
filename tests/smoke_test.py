@@ -276,6 +276,74 @@ def smoke_bar_toggle():
             os.unlink(cache_file)
 
 
+def smoke_overflow():
+    import re
+    import time as _time
+
+    payload = {
+        "model": {"display_name": "Opus"},
+        "context_window": {
+            "used_percentage": 25,
+            "context_window_size": 200000,
+            "total_input_tokens": 5000,
+            "total_output_tokens": 3000,
+        },
+        "cost": {"total_cost_usd": 0, "total_duration_ms": 300000},
+        "workspace": {"project_dir": str(ROOT)},
+    }
+    stdin = json.dumps(payload)
+    ansi_re = re.compile(r"\033\[[0-9;]*m")
+
+    cache_file = os.path.join(tempfile.gettempdir(), "claude-sl-usage.json")
+    cache_backup = None
+    if os.path.exists(cache_file):
+        cache_backup = pathlib.Path(cache_file).read_text(encoding="utf-8")
+    cache_data = json.dumps({
+        "five_hour_used": 85,
+        "seven_day_used": 40,
+        "five_hour_reset_min": 120,
+        "seven_day_reset_min": 4320,
+        "extra_enabled": True,
+        "extra_used": 6382,
+        "extra_limit": 10500,
+        "fetched_at": _time.time(),
+    })
+    pathlib.Path(cache_file).write_text(cache_data, encoding="utf-8")
+
+    try:
+        # With a tight max width, 5h and 7d must survive, lower-priority segments get dropped
+        proc = run(
+            [sys.executable, str(STATUSLINE_PY)],
+            stdin,
+            extra_env={"CQB_MAX_WIDTH": "50"},
+        )
+        assert_ok(proc, "overflow")
+        clean = ansi_re.sub("", proc.stdout)
+        assert_contains(clean, "5h:", "overflow (5h present)")
+        assert_contains(clean, "7d:", "overflow (7d present)")
+
+        # Extra usage ($) should be dropped to fit
+        if "$" in clean:
+            raise AssertionError(
+                f"overflow: extra usage should be dropped at width 50\noutput:\n{clean}"
+            )
+
+        # With unlimited width, extra usage should appear
+        proc = run(
+            [sys.executable, str(STATUSLINE_PY)],
+            stdin,
+            extra_env={"CQB_MAX_WIDTH": "200"},
+        )
+        assert_ok(proc, "no overflow")
+        clean = ansi_re.sub("", proc.stdout)
+        assert_contains(clean, "$", "no overflow (extra usage present)")
+    finally:
+        if cache_backup is not None:
+            pathlib.Path(cache_file).write_text(cache_backup, encoding="utf-8")
+        elif os.path.exists(cache_file):
+            os.unlink(cache_file)
+
+
 def main():
     smoke_statusline_py()
     smoke_empty_stdin()
@@ -285,6 +353,7 @@ def main():
     smoke_unix_install_wrapper()
     smoke_windows_install_wrapper()
     smoke_bar_toggle()
+    smoke_overflow()
     print("smoke tests passed")
 
 
