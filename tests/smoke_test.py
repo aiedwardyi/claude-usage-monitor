@@ -315,28 +315,28 @@ def smoke_overflow():
         proc = run(
             [sys.executable, str(STATUSLINE_PY)],
             stdin,
-            extra_env={"CQB_MAX_WIDTH": "50"},
+            extra_env={"CQB_MAX_WIDTH": "40", "CQB_DURATION": "1"},
         )
         assert_ok(proc, "overflow")
         clean = ansi_re.sub("", proc.stdout)
         assert_contains(clean, "5h:", "overflow (5h present)")
         assert_contains(clean, "7d:", "overflow (7d present)")
 
-        # Extra usage ($) should be dropped to fit
-        if "$" in clean:
+        # Duration should be dropped to fit at tight width
+        if "5m" in clean:
             raise AssertionError(
-                f"overflow: extra usage should be dropped at width 50\noutput:\n{clean}"
+                f"overflow: duration should be dropped at width 40\noutput:\n{clean}"
             )
 
-        # With unlimited width, extra usage should appear
+        # With unlimited width, all segments should appear
         proc = run(
             [sys.executable, str(STATUSLINE_PY)],
             stdin,
-            extra_env={"CQB_MAX_WIDTH": "200"},
+            extra_env={"CQB_MAX_WIDTH": "200", "CQB_DURATION": "1"},
         )
         assert_ok(proc, "no overflow")
         clean = ansi_re.sub("", proc.stdout)
-        assert_contains(clean, "$", "no overflow (extra usage present)")
+        assert_contains(clean, "5m", "no overflow (duration present)")
     finally:
         if cache_backup is not None:
             pathlib.Path(cache_file).write_text(cache_backup, encoding="utf-8")
