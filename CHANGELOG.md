@@ -8,6 +8,7 @@
 ### Changed
 - Removed extra usage dollar display ($X/$Y) - most users are trying to avoid extra usage, not track it
 - Added `CQB_MAX_WIDTH` env var (default 80) - low-priority segments (tokens, duration) are dropped gracefully when the line overflows instead of breaking the display
+- Added `CQB_CACHE_PATH` env var to override cache file location (used internally for test isolation)
 
 ## v0.1.2
 

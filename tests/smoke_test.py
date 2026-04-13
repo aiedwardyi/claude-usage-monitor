@@ -234,32 +234,30 @@ def smoke_bar_toggle():
     stdin = json.dumps(payload)
     ansi_re = re.compile(r"\033\[[0-9;]*m")
 
-    # Write a temp cache so quota data is available
-    cache_file = os.path.join(tempfile.gettempdir(), "claude-sl-usage.json")
-    cache_backup = None
-    if os.path.exists(cache_file):
-        cache_backup = pathlib.Path(cache_file).read_text(encoding="utf-8")
-    cache_data = json.dumps({
-        "five_hour_used": 30,
-        "seven_day_used": 50,
-        "five_hour_reset_min": 120,
-        "seven_day_reset_min": 4320,
-        "extra_enabled": False,
-        "extra_used": 0,
-        "extra_limit": 0,
-        "fetched_at": _time.time(),
-    })
-    pathlib.Path(cache_file).write_text(cache_data, encoding="utf-8")
+    with tempfile.TemporaryDirectory() as tmp:
+        cache_file = os.path.join(tmp, "test-cache.json")
+        cache_data = json.dumps({
+            "five_hour_used": 30,
+            "seven_day_used": 50,
+            "five_hour_reset_min": 120,
+            "seven_day_reset_min": 4320,
+            "extra_enabled": False,
+            "extra_used": 0,
+            "extra_limit": 0,
+            "fetched_at": _time.time(),
+        })
+        pathlib.Path(cache_file).write_text(cache_data, encoding="utf-8")
 
-    try:
+        cache_env = {"CQB_CACHE_PATH": cache_file}
+
         # Bar on by default: should have bar chars for context + 5h + 7d
-        proc = run([sys.executable, str(STATUSLINE_PY)], stdin)
+        proc = run([sys.executable, str(STATUSLINE_PY)], stdin, extra_env=cache_env)
         assert_ok(proc, "bar on (default)")
         clean = ansi_re.sub("", proc.stdout)
         bar_on_count = clean.count("\u25b0") + clean.count("\u25b1")
 
         # Bar off: should have fewer bar chars (only context gauge)
-        proc = run([sys.executable, str(STATUSLINE_PY)], stdin, extra_env={"CQB_BAR": "0"})
+        proc = run([sys.executable, str(STATUSLINE_PY)], stdin, extra_env={**cache_env, "CQB_BAR": "0"})
         assert_ok(proc, "bar off")
         clean = ansi_re.sub("", proc.stdout)
         bar_off_count = clean.count("\u25b0") + clean.count("\u25b1")
@@ -268,12 +266,6 @@ def smoke_bar_toggle():
             raise AssertionError(
                 f"default bar should have more chars: on={bar_on_count}, off={bar_off_count}"
             )
-    finally:
-        # Restore original cache
-        if cache_backup is not None:
-            pathlib.Path(cache_file).write_text(cache_backup, encoding="utf-8")
-        elif os.path.exists(cache_file):
-            os.unlink(cache_file)
 
 
 def smoke_overflow():
@@ -294,28 +286,27 @@ def smoke_overflow():
     stdin = json.dumps(payload)
     ansi_re = re.compile(r"\033\[[0-9;]*m")
 
-    cache_file = os.path.join(tempfile.gettempdir(), "claude-sl-usage.json")
-    cache_backup = None
-    if os.path.exists(cache_file):
-        cache_backup = pathlib.Path(cache_file).read_text(encoding="utf-8")
-    cache_data = json.dumps({
-        "five_hour_used": 85,
-        "seven_day_used": 40,
-        "five_hour_reset_min": 120,
-        "seven_day_reset_min": 4320,
-        "extra_enabled": True,
-        "extra_used": 6382,
-        "extra_limit": 10500,
-        "fetched_at": _time.time(),
-    })
-    pathlib.Path(cache_file).write_text(cache_data, encoding="utf-8")
+    with tempfile.TemporaryDirectory() as tmp:
+        cache_file = os.path.join(tmp, "test-cache.json")
+        cache_data = json.dumps({
+            "five_hour_used": 85,
+            "seven_day_used": 40,
+            "five_hour_reset_min": 120,
+            "seven_day_reset_min": 4320,
+            "extra_enabled": True,
+            "extra_used": 6382,
+            "extra_limit": 10500,
+            "fetched_at": _time.time(),
+        })
+        pathlib.Path(cache_file).write_text(cache_data, encoding="utf-8")
 
-    try:
+        cache_env = {"CQB_CACHE_PATH": cache_file}
+
         # With a tight max width, 5h and 7d must survive, lower-priority segments get dropped
         proc = run(
             [sys.executable, str(STATUSLINE_PY)],
             stdin,
-            extra_env={"CQB_MAX_WIDTH": "40", "CQB_DURATION": "1"},
+            extra_env={**cache_env, "CQB_MAX_WIDTH": "40", "CQB_DURATION": "1"},
         )
         assert_ok(proc, "overflow")
         clean = ansi_re.sub("", proc.stdout)
@@ -332,16 +323,11 @@ def smoke_overflow():
         proc = run(
             [sys.executable, str(STATUSLINE_PY)],
             stdin,
-            extra_env={"CQB_MAX_WIDTH": "200", "CQB_DURATION": "1"},
+            extra_env={**cache_env, "CQB_MAX_WIDTH": "200", "CQB_DURATION": "1"},
         )
         assert_ok(proc, "no overflow")
         clean = ansi_re.sub("", proc.stdout)
         assert_contains(clean, "5m", "no overflow (duration present)")
-    finally:
-        if cache_backup is not None:
-            pathlib.Path(cache_file).write_text(cache_backup, encoding="utf-8")
-        elif os.path.exists(cache_file):
-            os.unlink(cache_file)
 
 
 def main():

@@ -216,9 +216,12 @@ def pace_indicator(used_pct, remain_min, window_min):
 
 
 # ── Quota API ───────────────────────────────────────────────────
-CACHE_FILE = os.path.join(tempfile.gettempdir(), "claude-sl-usage.json")
+CACHE_FILE = os.environ.get(
+    "CQB_CACHE_PATH",
+    os.path.join(tempfile.gettempdir(), "claude-sl-usage.json"),
+)
 CACHE_TTL = 300  # 5 minutes
-LOCK_FILE = os.path.join(tempfile.gettempdir(), "claude-sl-usage.lock")
+LOCK_FILE = CACHE_FILE + ".lock"
 
 
 def get_oauth_token():
