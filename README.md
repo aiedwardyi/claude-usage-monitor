@@ -163,6 +163,7 @@ Every segment is toggleable via environment variables. Set them in your shell pr
 | `CQB_COST` | `0` | Show session cost |
 | `CQB_REMAINING` | `1` | Show remaining % (fuel gauge) for quotas; set `0` for used % |
 | `CQB_BAR` | `1` | Show visual progress bar next to 5h/7d quotas |
+| `CQB_MAX_WIDTH` | `80` | Max status line width; low-priority segments (tokens, duration) drop when line overflows |
 
 ### Presets
 
