@@ -216,6 +216,61 @@ def smoke_windows_install_wrapper():
             raise AssertionError(f"unexpected install.ps1 command: {command}")
 
 
+def smoke_windows_install_pipe():
+    # Regression: piped `irm install.ps1 | iex` invocation.
+    # When the installer is piped through Invoke-Expression it has no associated
+    # script file, so $MyInvocation.MyCommand.Path is $null. Splitting that path
+    # used to throw "Cannot bind argument to parameter 'Path' because it is null"
+    # before any work could happen. We pipe a Get-Content-loaded copy through
+    # Invoke-Expression to reproduce that context, point CLAUDE_USAGE_MONITOR_REPO
+    # at an unreachable target so the test finishes quickly without depending on
+    # GitHub, and assert the null-path error never reappears.
+    if os.name != "nt":
+        return
+
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".ps1", delete=False, encoding="utf-8"
+    ) as tmp:
+        tmp.write(INSTALL_PS1.read_text(encoding="utf-8"))
+        script_copy = tmp.name
+
+    try:
+        ps_command = (
+            "$ErrorActionPreference = 'Continue'; "
+            f"$s = Get-Content -Raw -LiteralPath '{script_copy}'; "
+            "$s | Invoke-Expression"
+        )
+        env = os.environ.copy()
+        env["CLAUDE_USAGE_MONITOR_REPO"] = "claude-usage-monitor-tests/unreachable"
+        env["CLAUDE_USAGE_MONITOR_REF"] = "no-such-ref"
+        proc = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                ps_command,
+            ],
+            text=True,
+            capture_output=True,
+            cwd=ROOT,
+            timeout=60,
+            env=env,
+        )
+
+        combined = (proc.stdout or "") + (proc.stderr or "")
+        if "Cannot bind argument to parameter 'Path'" in combined:
+            raise AssertionError(
+                "piped install.ps1 regressed to null-path error\n"
+                f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+            )
+    finally:
+        try:
+            os.unlink(script_copy)
+        except OSError:
+            pass
+
+
 def smoke_bar_toggle():
     import re
     import time as _time
@@ -338,6 +393,7 @@ def main():
     smoke_installer()
     smoke_unix_install_wrapper()
     smoke_windows_install_wrapper()
+    smoke_windows_install_pipe()
     smoke_bar_toggle()
     smoke_overflow()
     print("smoke tests passed")
