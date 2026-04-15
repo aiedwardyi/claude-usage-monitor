@@ -283,47 +283,58 @@ def smoke_windows_install_pipe():
 
 def smoke_build_status_command():
     # build_status_command picks the form written into settings.json:
-    #   - posix: always `bash "<install_dir>/statusline.sh"`
-    #   - nt + bash on PATH: `bash "<install_dir>/statusline.sh"` (works under
-    #     cmd, PowerShell, and bash; needed for hosts where Claude Code spawns
-    #     statusLine through a bash shell that does not recognise `.cmd`)
-    #   - nt + no bash: bare `<install_dir>\statusline.cmd` fallback
+    #   - posix: always `bash <shell-quoted-path-to-statusline.sh>`
+    #   - nt + bash on PATH: `bash "<install_dir-with-forward-slashes>/statusline.sh"`
+    #     (works under cmd, PowerShell, and bash; needed for hosts where
+    #     Claude Code spawns statusLine through a bash shell that does not
+    #     recognise `.cmd`)
+    #   - nt + no bash: path to `<install_dir>\statusline.cmd` fallback
     import importlib.util
+    from types import SimpleNamespace
+    from unittest import mock
 
     spec = importlib.util.spec_from_file_location("_install_under_test", INSTALL_PY)
     install_mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(install_mod)
 
-    install_dir = pathlib.Path("/tmp/claude-usage-monitor-test-install")
-    real_which = install_mod.shutil.which
-    real_os_name = install_mod.os.name
-    try:
-        # Simulate Windows + bash present.
-        install_mod.os.name = "nt"
-        install_mod.shutil.which = lambda name: "C:/Program Files/Git/bin/bash.exe" if name == "bash" else None
-        cmd = install_mod.build_status_command(install_dir)
+    # PureWindowsPath str() produces backslashes, so the nt branch genuinely
+    # exercises (and the assertion can detect) the forward-slash normalization.
+    nt_install_dir = pathlib.PureWindowsPath(
+        r"C:\Users\test\.claude\plugins\claude-usage-monitor"
+    )
+    posix_install_dir = pathlib.PurePosixPath(
+        "/home/test/.claude/plugins/claude-usage-monitor"
+    )
+
+    bash_present = lambda name: r"C:\Program Files\Git\bin\bash.exe" if name == "bash" else None
+    bash_absent = lambda name: None
+
+    # nt + bash on PATH -> bash form, forward slashes, double-quoted.
+    with mock.patch.object(install_mod, "os", SimpleNamespace(name="nt")), \
+         mock.patch.object(install_mod.shutil, "which", bash_present):
+        cmd = install_mod.build_status_command(nt_install_dir)
         if not cmd.startswith('bash "') or not cmd.endswith('/statusline.sh"'):
             raise AssertionError(f"nt+bash should produce bash-form, got: {cmd}")
         if "\\" in cmd:
             raise AssertionError(f"nt+bash command should use forward slashes, got: {cmd}")
 
-        # Simulate Windows + no bash.
-        install_mod.shutil.which = lambda name: None
-        cmd = install_mod.build_status_command(install_dir)
+    # nt without bash -> bare `.cmd` fallback.
+    with mock.patch.object(install_mod, "os", SimpleNamespace(name="nt")), \
+         mock.patch.object(install_mod.shutil, "which", bash_absent):
+        cmd = install_mod.build_status_command(nt_install_dir)
         if not cmd.endswith("statusline.cmd"):
             raise AssertionError(f"nt without bash should fall back to .cmd, got: {cmd}")
         if cmd.startswith("bash"):
             raise AssertionError(f"nt without bash should not invoke bash, got: {cmd}")
 
-        # Simulate posix - always bash form regardless of which() result.
-        install_mod.os.name = "posix"
-        install_mod.shutil.which = lambda name: None
-        cmd = install_mod.build_status_command(install_dir)
+    # posix -> always bash form (shlex.quote, never depends on which()).
+    with mock.patch.object(install_mod, "os", SimpleNamespace(name="posix")), \
+         mock.patch.object(install_mod.shutil, "which", bash_absent):
+        cmd = install_mod.build_status_command(posix_install_dir)
         if not cmd.startswith("bash "):
             raise AssertionError(f"posix should always use bash form, got: {cmd}")
-    finally:
-        install_mod.shutil.which = real_which
-        install_mod.os.name = real_os_name
+        if "statusline.sh" not in cmd:
+            raise AssertionError(f"posix command should reference statusline.sh, got: {cmd}")
 
 
 def smoke_bar_toggle():

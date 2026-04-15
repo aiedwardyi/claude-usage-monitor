@@ -73,26 +73,37 @@ def copy_runtime_files(source_dir: Path, install_dir: Path) -> list[Path]:
     return copied
 
 
+def _use_bash_launcher() -> bool:
+    """Whether the installed statusLine launcher should run via bash.
+
+    On posix we always use bash. On Windows we use bash when it is on PATH so
+    Claude Code installs that spawn statusLine through a bash-style shell (e.g.
+    Git Bash, where `.cmd` is not executable and the command silently produces
+    no output) still render. Hosts without bash fall back to the bare `.cmd`
+    launcher, which works under cmd and PowerShell.
+    """
+    if os.name != "nt":
+        return True
+    return shutil.which("bash") is not None
+
+
 def build_status_command(install_dir: Path) -> str:
-    if os.name == "nt":
-        # On Windows, Claude Code may spawn statusLine commands through cmd /
-        # PowerShell (where the `.cmd` extension is recognised) or through a
-        # bash-style shell such as Git Bash (where `.cmd` is not executable and
-        # the command silently produces no output, leaving the statusline
-        # blank). When `bash` is on PATH we write the `.sh` form, which is
-        # interpretable by all three; otherwise we fall back to the `.cmd`
-        # path so installs without bash continue to work.
-        if shutil.which("bash"):
-            sh_path = str(install_dir / "statusline.sh").replace("\\", "/")
-            return f'bash "{sh_path}"'
-        return str(install_dir / "statusline.cmd")
-    return f"bash {shlex.quote(str(install_dir / 'statusline.sh'))}"
+    if _use_bash_launcher():
+        sh_path = str(install_dir / "statusline.sh")
+        if os.name == "nt":
+            # Hard-quote with double quotes and forward-slash the path so bash
+            # (which treats `\` as an escape) and cmd / PowerShell (which need
+            # a quoted argument across spaces) all parse it the same way.
+            posix_path = sh_path.replace("\\", "/")
+            return f'bash "{posix_path}"'
+        return f"bash {shlex.quote(sh_path)}"
+    return str(install_dir / "statusline.cmd")
 
 
 def build_verify_command(install_dir: Path) -> str:
-    if os.name == "nt":
-        return f'type nul | "{install_dir / "statusline.cmd"}"'
-    return f"printf '' | bash {shlex.quote(str(install_dir / 'statusline.sh'))}"
+    if _use_bash_launcher():
+        return f"printf '' | bash {shlex.quote(str(install_dir / 'statusline.sh'))}"
+    return f'type nul | "{install_dir / "statusline.cmd"}"'
 
 
 def load_settings(path: Path) -> tuple[dict, str]:
@@ -141,10 +152,13 @@ def update_settings(settings_path: Path, install_dir: Path) -> tuple[Path | None
 
 
 def verify_install(install_dir: Path) -> tuple[bool, str]:
-    if os.name == "nt":
-        command = ["cmd", "/c", str(install_dir / "statusline.cmd")]
-    else:
+    # Exercise the same launcher shape that update_settings will write into
+    # settings.json, so a "Launcher check: passed" line can't be reported when
+    # the configured statusLine command would actually fail at runtime.
+    if _use_bash_launcher():
         command = ["bash", str(install_dir / "statusline.sh")]
+    else:
+        command = ["cmd", "/c", str(install_dir / "statusline.cmd")]
 
     try:
         proc = subprocess.run(
