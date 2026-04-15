@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.1.4
+
+### Fixed
+- Piped PowerShell installer (`irm .../install.ps1 | iex`) failed immediately on PS 5.1 and 7 with `Cannot bind argument to parameter 'Path' because it is null` because `$MyInvocation.MyCommand.Path` is unset when the script has no associated file. The installer now resolves its own path defensively and falls through to the remote-download branch when no local checkout is detected (#8).
+- Local-checkout fast path now handles checkouts whose paths contain PowerShell wildcard characters (e.g. `[`, `]`) correctly via `[IO.Path]::GetDirectoryName` and `Test-Path -LiteralPath`.
+
+### Added
+- Windows smoke test that exercises the piped `irm | iex` invocation and asserts the null-path regression cannot return.
+
 ## v0.1.3
 
 ### Fixed
