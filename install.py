@@ -73,16 +73,69 @@ def copy_runtime_files(source_dir: Path, install_dir: Path) -> list[Path]:
     return copied
 
 
-def build_status_command(install_dir: Path) -> str:
+def _use_bash_launcher() -> bool:
+    """Whether the installed statusLine launcher should run via bash.
+
+    On posix we always use bash. On Windows we use bash when a working bash is
+    on PATH so Claude Code installs that spawn statusLine through a bash-style
+    shell (e.g. Git Bash, where `.cmd` is not executable and the command
+    silently produces no output) still render. Hosts without a working bash
+    fall back to the bare `.cmd` launcher, which works under cmd and
+    PowerShell.
+
+    The probe (`bash -c "exit 0"`) is necessary because the WSL stub at
+    `C:\\Windows\\System32\\bash.exe` is on PATH on most modern Windows installs
+    but errors at invocation time when no Linux distro is installed.
+    """
+    if os.name != "nt":
+        return True
+    if not shutil.which("bash"):
+        return False
+    try:
+        result = subprocess.run(
+            ["bash", "-c", "exit 0"],
+            capture_output=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
+
+
+def _bash_script_arg(install_dir: Path) -> str:
+    """Path to statusline.sh for use as a bash argument.
+
+    On Windows bash treats `\\` as an escape when parsing its own command
+    line, so the installed statusLine command and the verification command
+    both use forward slashes. Normalising in one place keeps the three call
+    sites (launcher, printed verify hint, in-process verify) consistent so
+    what gets tested in verify_install matches what is written into
+    settings.json and what is shown to the user.
+    """
+    sh_path = str(install_dir / "statusline.sh")
     if os.name == "nt":
-        return str(install_dir / "statusline.cmd")
-    return f"bash {shlex.quote(str(install_dir / 'statusline.sh'))}"
+        sh_path = sh_path.replace("\\", "/")
+    return sh_path
+
+
+def build_status_command(install_dir: Path) -> str:
+    if _use_bash_launcher():
+        sh_arg = _bash_script_arg(install_dir)
+        if os.name == "nt":
+            # Hard-quote with double quotes so cmd / PowerShell parse the path
+            # as one argument across spaces, and bash receives it intact.
+            return f'bash "{sh_arg}"'
+        return f"bash {shlex.quote(sh_arg)}"
+    return str(install_dir / "statusline.cmd")
 
 
 def build_verify_command(install_dir: Path) -> str:
-    if os.name == "nt":
-        return f'type nul | "{install_dir / "statusline.cmd"}"'
-    return f"printf '' | bash {shlex.quote(str(install_dir / 'statusline.sh'))}"
+    if _use_bash_launcher():
+        sh_arg = _bash_script_arg(install_dir)
+        if os.name == "nt":
+            return f'printf "" | bash "{sh_arg}"'
+        return f"printf '' | bash {shlex.quote(sh_arg)}"
+    return f'type nul | "{install_dir / "statusline.cmd"}"'
 
 
 def load_settings(path: Path) -> tuple[dict, str]:
@@ -131,10 +184,15 @@ def update_settings(settings_path: Path, install_dir: Path) -> tuple[Path | None
 
 
 def verify_install(install_dir: Path) -> tuple[bool, str]:
-    if os.name == "nt":
-        command = ["cmd", "/c", str(install_dir / "statusline.cmd")]
+    # Exercise the same launcher shape that update_settings will write into
+    # settings.json, so a "Launcher check: passed" line can't be reported when
+    # the configured statusLine command would actually fail at runtime. Using
+    # _bash_script_arg keeps the path normalisation identical to the command
+    # we write, so verification and configuration can't silently diverge.
+    if _use_bash_launcher():
+        command = ["bash", _bash_script_arg(install_dir)]
     else:
-        command = ["bash", str(install_dir / "statusline.sh")]
+        command = ["cmd", "/c", str(install_dir / "statusline.cmd")]
 
     try:
         proc = subprocess.run(
