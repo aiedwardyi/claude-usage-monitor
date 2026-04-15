@@ -76,15 +76,30 @@ def copy_runtime_files(source_dir: Path, install_dir: Path) -> list[Path]:
 def _use_bash_launcher() -> bool:
     """Whether the installed statusLine launcher should run via bash.
 
-    On posix we always use bash. On Windows we use bash when it is on PATH so
-    Claude Code installs that spawn statusLine through a bash-style shell (e.g.
-    Git Bash, where `.cmd` is not executable and the command silently produces
-    no output) still render. Hosts without bash fall back to the bare `.cmd`
-    launcher, which works under cmd and PowerShell.
+    On posix we always use bash. On Windows we use bash when a working bash is
+    on PATH so Claude Code installs that spawn statusLine through a bash-style
+    shell (e.g. Git Bash, where `.cmd` is not executable and the command
+    silently produces no output) still render. Hosts without a working bash
+    fall back to the bare `.cmd` launcher, which works under cmd and
+    PowerShell.
+
+    The probe (`bash -c "exit 0"`) is necessary because the WSL stub at
+    `C:\\Windows\\System32\\bash.exe` is on PATH on most modern Windows installs
+    but errors at invocation time when no Linux distro is installed.
     """
     if os.name != "nt":
         return True
-    return shutil.which("bash") is not None
+    if not shutil.which("bash"):
+        return False
+    try:
+        result = subprocess.run(
+            ["bash", "-c", "exit 0"],
+            capture_output=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
 
 
 def build_status_command(install_dir: Path) -> str:

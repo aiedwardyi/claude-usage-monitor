@@ -17,6 +17,27 @@ STATUSLINE_SH = ROOT / "statusline.sh"
 STATUSLINE_CMD = ROOT / "statusline.cmd"
 
 
+def _bash_launcher_expected() -> bool:
+    # Mirror install.py's _use_bash_launcher so end-to-end installer tests
+    # expect whichever launcher form install.py will actually write for the
+    # current host. On posix this is always True; on Windows it requires a
+    # bash on PATH whose `bash -c "exit 0"` probe succeeds (so the WSL stub
+    # without a Linux distro installed is correctly classified as unusable).
+    if os.name != "nt":
+        return True
+    if not shutil.which("bash"):
+        return False
+    try:
+        result = subprocess.run(
+            ["bash", "-c", "exit 0"],
+            capture_output=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
+
+
 def run(command, stdin_text="", extra_env=None):
     env = os.environ.copy()
     env["CQB_TOKENS"] = "0"
@@ -143,13 +164,12 @@ def smoke_installer():
             raise AssertionError("install.py did not preserve existing settings")
 
         command = settings.get("statusLine", {}).get("command", "")
-        # On Windows the installer prefers the bash-form launcher when bash is
-        # on PATH (works under cmd, PowerShell, and bash) and falls back to the
-        # bare `.cmd` path otherwise.
-        if os.name == "nt":
-            expected_fragment = "statusline.sh" if shutil.which("bash") else "statusline.cmd"
-        else:
-            expected_fragment = "statusline.sh"
+        # On Windows the installer prefers the bash-form launcher when a
+        # working bash is present (probed at install time) and falls back to
+        # the bare `.cmd` path otherwise. Use the same helper install.py uses
+        # so CI runners where `bash` on PATH is a broken WSL stub expect the
+        # `.cmd` form rather than the bash form.
+        expected_fragment = "statusline.sh" if _bash_launcher_expected() else "statusline.cmd"
         if expected_fragment not in command:
             raise AssertionError(f"unexpected installed command: {command}")
 
@@ -219,7 +239,7 @@ def smoke_windows_install_wrapper():
 
         settings = json.loads(settings_path.read_text(encoding="utf-8"))
         command = settings.get("statusLine", {}).get("command", "")
-        expected_fragment = "statusline.sh" if shutil.which("bash") else "statusline.cmd"
+        expected_fragment = "statusline.sh" if _bash_launcher_expected() else "statusline.cmd"
         if expected_fragment not in command:
             raise AssertionError(f"unexpected install.ps1 command: {command}")
 
@@ -284,11 +304,12 @@ def smoke_windows_install_pipe():
 def smoke_build_status_command():
     # build_status_command picks the form written into settings.json:
     #   - posix: always `bash <shell-quoted-path-to-statusline.sh>`
-    #   - nt + bash on PATH: `bash "<install_dir-with-forward-slashes>/statusline.sh"`
+    #   - nt + working bash on PATH: `bash "<install_dir-with-forward-slashes>/statusline.sh"`
     #     (works under cmd, PowerShell, and bash; needed for hosts where
     #     Claude Code spawns statusLine through a bash shell that does not
     #     recognise `.cmd`)
-    #   - nt + no bash: path to `<install_dir>\statusline.cmd` fallback
+    #   - nt + no bash (or only a broken `bash.exe`, e.g. the WSL stub with no
+    #     distro installed): path to `<install_dir>\statusline.cmd` fallback.
     import importlib.util
     from types import SimpleNamespace
     from unittest import mock
@@ -308,17 +329,38 @@ def smoke_build_status_command():
 
     bash_present = lambda name: r"C:\Program Files\Git\bin\bash.exe" if name == "bash" else None
     bash_absent = lambda name: None
+    probe_ok = lambda *a, **k: SimpleNamespace(returncode=0)
+    probe_fail = lambda *a, **k: SimpleNamespace(returncode=1)
+    probe_raises_oserror = lambda *a, **k: (_ for _ in ()).throw(OSError("simulated spawn failure"))
 
-    # nt + bash on PATH -> bash form, forward slashes, double-quoted.
+    # nt + working bash -> bash form, forward slashes, double-quoted.
     with mock.patch.object(install_mod, "os", SimpleNamespace(name="nt")), \
-         mock.patch.object(install_mod.shutil, "which", bash_present):
+         mock.patch.object(install_mod.shutil, "which", bash_present), \
+         mock.patch.object(install_mod.subprocess, "run", probe_ok):
         cmd = install_mod.build_status_command(nt_install_dir)
         if not cmd.startswith('bash "') or not cmd.endswith('/statusline.sh"'):
             raise AssertionError(f"nt+bash should produce bash-form, got: {cmd}")
         if "\\" in cmd:
             raise AssertionError(f"nt+bash command should use forward slashes, got: {cmd}")
 
-    # nt without bash -> bare `.cmd` fallback.
+    # nt + bash on PATH but probe fails (e.g. WSL stub without a distro)
+    # -> treat as no usable bash and fall back to `.cmd`.
+    with mock.patch.object(install_mod, "os", SimpleNamespace(name="nt")), \
+         mock.patch.object(install_mod.shutil, "which", bash_present), \
+         mock.patch.object(install_mod.subprocess, "run", probe_fail):
+        cmd = install_mod.build_status_command(nt_install_dir)
+        if not cmd.endswith("statusline.cmd"):
+            raise AssertionError(f"nt+broken-bash should fall back to .cmd, got: {cmd}")
+
+    # nt + probe raises OSError -> treat as no usable bash.
+    with mock.patch.object(install_mod, "os", SimpleNamespace(name="nt")), \
+         mock.patch.object(install_mod.shutil, "which", bash_present), \
+         mock.patch.object(install_mod.subprocess, "run", probe_raises_oserror):
+        cmd = install_mod.build_status_command(nt_install_dir)
+        if not cmd.endswith("statusline.cmd"):
+            raise AssertionError(f"nt+probe-raises should fall back to .cmd, got: {cmd}")
+
+    # nt without bash -> bare `.cmd` fallback (probe not reached).
     with mock.patch.object(install_mod, "os", SimpleNamespace(name="nt")), \
          mock.patch.object(install_mod.shutil, "which", bash_absent):
         cmd = install_mod.build_status_command(nt_install_dir)
@@ -327,7 +369,7 @@ def smoke_build_status_command():
         if cmd.startswith("bash"):
             raise AssertionError(f"nt without bash should not invoke bash, got: {cmd}")
 
-    # posix -> always bash form (shlex.quote, never depends on which()).
+    # posix -> always bash form (shlex.quote, never depends on which() or probe).
     with mock.patch.object(install_mod, "os", SimpleNamespace(name="posix")), \
          mock.patch.object(install_mod.shutil, "which", bash_absent):
         cmd = install_mod.build_status_command(posix_install_dir)
