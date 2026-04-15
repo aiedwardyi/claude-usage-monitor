@@ -216,6 +216,63 @@ def smoke_windows_install_wrapper():
             raise AssertionError(f"unexpected install.ps1 command: {command}")
 
 
+def smoke_windows_install_pipe():
+    # Regression: piped `irm install.ps1 | iex` invocation.
+    # When the installer is piped through Invoke-Expression it has no associated
+    # script file, so $MyInvocation.MyCommand.Path is unset. Splitting that path
+    # used to throw "Cannot bind argument to parameter 'Path' ..." before any
+    # work could happen. We pipe a Get-Content-loaded copy through
+    # Invoke-Expression to reproduce that context, stub Invoke-WebRequest so the
+    # check stays offline, and assert the null-path error never reappears.
+    if os.name != "nt":
+        return
+
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".ps1", delete=False, encoding="utf-8"
+    ) as tmp:
+        tmp.write(INSTALL_PS1.read_text(encoding="utf-8"))
+        script_copy = tmp.name
+
+    try:
+        # Escape single quotes for embedding in a PS single-quoted literal.
+        script_copy_ps = script_copy.replace("'", "''")
+        # install.ps1 sets $ErrorActionPreference = 'Stop' at the top, so the
+        # stub throw (and any other terminating error inside the script) is a
+        # terminating error from PowerShell's perspective. Wrap the iex in
+        # try/catch so we can capture the failure mode for assertion.
+        ps_command = (
+            "function Invoke-WebRequest { throw 'stubbed for tests' }; "
+            f"$s = Get-Content -Raw -LiteralPath '{script_copy_ps}'; "
+            "try { $s | Invoke-Expression } "
+            "catch { [Console]::Error.WriteLine($_.Exception.Message) }"
+        )
+        proc = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                ps_command,
+            ],
+            text=True,
+            capture_output=True,
+            cwd=ROOT,
+            timeout=60,
+        )
+
+        combined = (proc.stdout or "") + (proc.stderr or "")
+        if "Cannot bind argument to parameter 'Path'" in combined:
+            raise AssertionError(
+                "piped install.ps1 regressed to null-path error\n"
+                f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+            )
+    finally:
+        try:
+            os.unlink(script_copy)
+        except OSError:
+            pass
+
+
 def smoke_bar_toggle():
     import re
     import time as _time
@@ -338,6 +395,7 @@ def main():
     smoke_installer()
     smoke_unix_install_wrapper()
     smoke_windows_install_wrapper()
+    smoke_windows_install_pipe()
     smoke_bar_toggle()
     smoke_overflow()
     print("smoke tests passed")

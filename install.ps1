@@ -47,13 +47,27 @@ function Get-InstallerArgs {
 }
 
 $python = Find-Python
-$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$localInstaller = Join-Path $scriptDir "install.py"
 $installerArgs = Get-InstallerArgs
 
-if (Test-Path $localInstaller) {
-    Invoke-Python -Python $python -ScriptPath $localInstaller -ScriptArgs $installerArgs
-    exit $LASTEXITCODE
+# Resolve the script's own path so we can run an adjacent install.py when invoked
+# from a local checkout (`.\install.ps1` or `powershell -File install.ps1`).
+# When the script is piped through Invoke-Expression -- the documented
+# `irm ... | iex` install flow -- it has no associated file and both
+# $MyInvocation.MyCommand.Path and $PSCommandPath are $null; in that case we
+# fall through to the remote-download branch below.
+$scriptPath = $MyInvocation.MyCommand.Path
+if (-not $scriptPath) { $scriptPath = $PSCommandPath }
+
+if ($scriptPath) {
+    # [IO.Path]::GetDirectoryName / Test-Path -LiteralPath are used instead of
+    # Split-Path -Parent / Test-Path so paths containing PowerShell wildcard
+    # characters (e.g. `[`, `]`) are not misinterpreted. (Split-Path's
+    # -LiteralPath and -Parent are in different parameter sets on PS 5.1.)
+    $localInstaller = Join-Path ([System.IO.Path]::GetDirectoryName($scriptPath)) "install.py"
+    if (Test-Path -LiteralPath $localInstaller) {
+        Invoke-Python -Python $python -ScriptPath $localInstaller -ScriptArgs $installerArgs
+        exit $LASTEXITCODE
+    }
 }
 
 $repo = if ($env:CLAUDE_USAGE_MONITOR_REPO) { $env:CLAUDE_USAGE_MONITOR_REPO } else { "aiedwardyi/claude-usage-monitor" }
