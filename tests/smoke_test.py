@@ -2,6 +2,7 @@
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -142,7 +143,13 @@ def smoke_installer():
             raise AssertionError("install.py did not preserve existing settings")
 
         command = settings.get("statusLine", {}).get("command", "")
-        expected_fragment = "statusline.cmd" if os.name == "nt" else "statusline.sh"
+        # On Windows the installer prefers the bash-form launcher when bash is
+        # on PATH (works under cmd, PowerShell, and bash) and falls back to the
+        # bare `.cmd` path otherwise.
+        if os.name == "nt":
+            expected_fragment = "statusline.sh" if shutil.which("bash") else "statusline.cmd"
+        else:
+            expected_fragment = "statusline.sh"
         if expected_fragment not in command:
             raise AssertionError(f"unexpected installed command: {command}")
 
@@ -212,7 +219,8 @@ def smoke_windows_install_wrapper():
 
         settings = json.loads(settings_path.read_text(encoding="utf-8"))
         command = settings.get("statusLine", {}).get("command", "")
-        if "statusline.cmd" not in command:
+        expected_fragment = "statusline.sh" if shutil.which("bash") else "statusline.cmd"
+        if expected_fragment not in command:
             raise AssertionError(f"unexpected install.ps1 command: {command}")
 
 
@@ -271,6 +279,51 @@ def smoke_windows_install_pipe():
             os.unlink(script_copy)
         except OSError:
             pass
+
+
+def smoke_build_status_command():
+    # build_status_command picks the form written into settings.json:
+    #   - posix: always `bash "<install_dir>/statusline.sh"`
+    #   - nt + bash on PATH: `bash "<install_dir>/statusline.sh"` (works under
+    #     cmd, PowerShell, and bash; needed for hosts where Claude Code spawns
+    #     statusLine through a bash shell that does not recognise `.cmd`)
+    #   - nt + no bash: bare `<install_dir>\statusline.cmd` fallback
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_install_under_test", INSTALL_PY)
+    install_mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(install_mod)
+
+    install_dir = pathlib.Path("/tmp/claude-usage-monitor-test-install")
+    real_which = install_mod.shutil.which
+    real_os_name = install_mod.os.name
+    try:
+        # Simulate Windows + bash present.
+        install_mod.os.name = "nt"
+        install_mod.shutil.which = lambda name: "C:/Program Files/Git/bin/bash.exe" if name == "bash" else None
+        cmd = install_mod.build_status_command(install_dir)
+        if not cmd.startswith('bash "') or not cmd.endswith('/statusline.sh"'):
+            raise AssertionError(f"nt+bash should produce bash-form, got: {cmd}")
+        if "\\" in cmd:
+            raise AssertionError(f"nt+bash command should use forward slashes, got: {cmd}")
+
+        # Simulate Windows + no bash.
+        install_mod.shutil.which = lambda name: None
+        cmd = install_mod.build_status_command(install_dir)
+        if not cmd.endswith("statusline.cmd"):
+            raise AssertionError(f"nt without bash should fall back to .cmd, got: {cmd}")
+        if cmd.startswith("bash"):
+            raise AssertionError(f"nt without bash should not invoke bash, got: {cmd}")
+
+        # Simulate posix - always bash form regardless of which() result.
+        install_mod.os.name = "posix"
+        install_mod.shutil.which = lambda name: None
+        cmd = install_mod.build_status_command(install_dir)
+        if not cmd.startswith("bash "):
+            raise AssertionError(f"posix should always use bash form, got: {cmd}")
+    finally:
+        install_mod.shutil.which = real_which
+        install_mod.os.name = real_os_name
 
 
 def smoke_bar_toggle():
@@ -396,6 +449,7 @@ def main():
     smoke_unix_install_wrapper()
     smoke_windows_install_wrapper()
     smoke_windows_install_pipe()
+    smoke_build_status_command()
     smoke_bar_toggle()
     smoke_overflow()
     print("smoke tests passed")

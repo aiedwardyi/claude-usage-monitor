@@ -75,6 +75,16 @@ def copy_runtime_files(source_dir: Path, install_dir: Path) -> list[Path]:
 
 def build_status_command(install_dir: Path) -> str:
     if os.name == "nt":
+        # On Windows, Claude Code may spawn statusLine commands through cmd /
+        # PowerShell (where the `.cmd` extension is recognised) or through a
+        # bash-style shell such as Git Bash (where `.cmd` is not executable and
+        # the command silently produces no output, leaving the statusline
+        # blank). When `bash` is on PATH we write the `.sh` form, which is
+        # interpretable by all three; otherwise we fall back to the `.cmd`
+        # path so installs without bash continue to work.
+        if shutil.which("bash"):
+            sh_path = str(install_dir / "statusline.sh").replace("\\", "/")
+            return f'bash "{sh_path}"'
         return str(install_dir / "statusline.cmd")
     return f"bash {shlex.quote(str(install_dir / 'statusline.sh'))}"
 
