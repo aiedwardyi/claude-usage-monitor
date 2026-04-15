@@ -219,12 +219,11 @@ def smoke_windows_install_wrapper():
 def smoke_windows_install_pipe():
     # Regression: piped `irm install.ps1 | iex` invocation.
     # When the installer is piped through Invoke-Expression it has no associated
-    # script file, so $MyInvocation.MyCommand.Path is $null. Splitting that path
-    # used to throw "Cannot bind argument to parameter 'Path' because it is null"
-    # before any work could happen. We pipe a Get-Content-loaded copy through
-    # Invoke-Expression to reproduce that context, point CLAUDE_USAGE_MONITOR_REPO
-    # at an unreachable target so the test finishes quickly without depending on
-    # GitHub, and assert the null-path error never reappears.
+    # script file, so $MyInvocation.MyCommand.Path is unset. Splitting that path
+    # used to throw "Cannot bind argument to parameter 'Path' ..." before any
+    # work could happen. We pipe a Get-Content-loaded copy through
+    # Invoke-Expression to reproduce that context, stub Invoke-WebRequest so the
+    # check stays offline, and assert the null-path error never reappears.
     if os.name != "nt":
         return
 
@@ -235,14 +234,18 @@ def smoke_windows_install_pipe():
         script_copy = tmp.name
 
     try:
+        # Escape single quotes for embedding in a PS single-quoted literal.
+        script_copy_ps = script_copy.replace("'", "''")
+        # install.ps1 sets $ErrorActionPreference = 'Stop' at the top, so the
+        # stub throw (and any other terminating error inside the script) is a
+        # terminating error from PowerShell's perspective. Wrap the iex in
+        # try/catch so we can capture the failure mode for assertion.
         ps_command = (
-            "$ErrorActionPreference = 'Continue'; "
-            f"$s = Get-Content -Raw -LiteralPath '{script_copy}'; "
-            "$s | Invoke-Expression"
+            "function Invoke-WebRequest { throw 'stubbed for tests' }; "
+            f"$s = Get-Content -Raw -LiteralPath '{script_copy_ps}'; "
+            "try { $s | Invoke-Expression } "
+            "catch { [Console]::Error.WriteLine($_.Exception.Message) }"
         )
-        env = os.environ.copy()
-        env["CLAUDE_USAGE_MONITOR_REPO"] = "claude-usage-monitor-tests/unreachable"
-        env["CLAUDE_USAGE_MONITOR_REF"] = "no-such-ref"
         proc = subprocess.run(
             [
                 "powershell",
@@ -255,7 +258,6 @@ def smoke_windows_install_pipe():
             capture_output=True,
             cwd=ROOT,
             timeout=60,
-            env=env,
         )
 
         combined = (proc.stdout or "") + (proc.stderr or "")

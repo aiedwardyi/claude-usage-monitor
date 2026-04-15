@@ -59,8 +59,12 @@ $scriptPath = $MyInvocation.MyCommand.Path
 if (-not $scriptPath) { $scriptPath = $PSCommandPath }
 
 if ($scriptPath) {
-    $localInstaller = Join-Path (Split-Path -Parent $scriptPath) "install.py"
-    if (Test-Path $localInstaller) {
+    # [IO.Path]::GetDirectoryName / Test-Path -LiteralPath are used instead of
+    # Split-Path -Parent / Test-Path so paths containing PowerShell wildcard
+    # characters (e.g. `[`, `]`) are not misinterpreted. (Split-Path's
+    # -LiteralPath and -Parent are in different parameter sets on PS 5.1.)
+    $localInstaller = Join-Path ([System.IO.Path]::GetDirectoryName($scriptPath)) "install.py"
+    if (Test-Path -LiteralPath $localInstaller) {
         Invoke-Python -Python $python -ScriptPath $localInstaller -ScriptArgs $installerArgs
         exit $LASTEXITCODE
     }
