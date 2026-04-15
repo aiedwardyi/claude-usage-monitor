@@ -102,22 +102,39 @@ def _use_bash_launcher() -> bool:
     return result.returncode == 0
 
 
+def _bash_script_arg(install_dir: Path) -> str:
+    """Path to statusline.sh for use as a bash argument.
+
+    On Windows bash treats `\\` as an escape when parsing its own command
+    line, so the installed statusLine command and the verification command
+    both use forward slashes. Normalising in one place keeps the three call
+    sites (launcher, printed verify hint, in-process verify) consistent so
+    what gets tested in verify_install matches what is written into
+    settings.json and what is shown to the user.
+    """
+    sh_path = str(install_dir / "statusline.sh")
+    if os.name == "nt":
+        sh_path = sh_path.replace("\\", "/")
+    return sh_path
+
+
 def build_status_command(install_dir: Path) -> str:
     if _use_bash_launcher():
-        sh_path = str(install_dir / "statusline.sh")
+        sh_arg = _bash_script_arg(install_dir)
         if os.name == "nt":
-            # Hard-quote with double quotes and forward-slash the path so bash
-            # (which treats `\` as an escape) and cmd / PowerShell (which need
-            # a quoted argument across spaces) all parse it the same way.
-            posix_path = sh_path.replace("\\", "/")
-            return f'bash "{posix_path}"'
-        return f"bash {shlex.quote(sh_path)}"
+            # Hard-quote with double quotes so cmd / PowerShell parse the path
+            # as one argument across spaces, and bash receives it intact.
+            return f'bash "{sh_arg}"'
+        return f"bash {shlex.quote(sh_arg)}"
     return str(install_dir / "statusline.cmd")
 
 
 def build_verify_command(install_dir: Path) -> str:
     if _use_bash_launcher():
-        return f"printf '' | bash {shlex.quote(str(install_dir / 'statusline.sh'))}"
+        sh_arg = _bash_script_arg(install_dir)
+        if os.name == "nt":
+            return f'printf "" | bash "{sh_arg}"'
+        return f"printf '' | bash {shlex.quote(sh_arg)}"
     return f'type nul | "{install_dir / "statusline.cmd"}"'
 
 
@@ -169,9 +186,11 @@ def update_settings(settings_path: Path, install_dir: Path) -> tuple[Path | None
 def verify_install(install_dir: Path) -> tuple[bool, str]:
     # Exercise the same launcher shape that update_settings will write into
     # settings.json, so a "Launcher check: passed" line can't be reported when
-    # the configured statusLine command would actually fail at runtime.
+    # the configured statusLine command would actually fail at runtime. Using
+    # _bash_script_arg keeps the path normalisation identical to the command
+    # we write, so verification and configuration can't silently diverge.
     if _use_bash_launcher():
-        command = ["bash", str(install_dir / "statusline.sh")]
+        command = ["bash", _bash_script_arg(install_dir)]
     else:
         command = ["cmd", "/c", str(install_dir / "statusline.cmd")]
 
