@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.1.5
+
+### Fixed
+- On Windows, the installer wrote a bare `.cmd` path into `settings.json`. That works when Claude Code spawns the statusLine through cmd or PowerShell, but on hosts that spawn it through a bash-style shell (e.g. Git Bash) `.cmd` is not recognised as executable and the statusline silently went blank. The installer now probes `bash -c "exit 0"` at install time and writes `bash "<install-dir>/statusline.sh"` when the probe succeeds, falling back to the bare `.cmd` path otherwise. Works under cmd, PowerShell, and bash (#10, #11).
+- The in-process launcher check (`verify_install`) and the printed verification hint (`build_verify_command`) now derive their bash argument from the same helper as the installed command, so the verification cannot pass while the configured statusLine would fail at runtime, and the printed hint is runnable as-is under cmd/PowerShell.
+
 ## v0.1.4
 
 ### Fixed
