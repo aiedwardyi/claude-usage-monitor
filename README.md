@@ -84,7 +84,7 @@ If you want to verify the launcher yourself before restarting Claude Code:
 | `7d: ▰▰▱▱▱ 34% (2d)` | 7-day quota remaining with bar and reset countdown |
 | `2m0s` | Session duration |
 
-All three bars show remaining % - they start full (green) and drain toward empty (red) as you use more. Set `CQB_REMAINING=0` for used % instead.
+All three bars show remaining % by default - they start full (green) and drain toward empty (red) as you use quota, like a fuel gauge. Prefer the fill-up style Claude Code uses? Set `CQB_REMAINING=0`.
 
 ### Color coding
 
