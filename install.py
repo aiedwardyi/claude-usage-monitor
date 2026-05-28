@@ -139,18 +139,36 @@ def _windows_python_command(install_dir: Path) -> str:
     survive the tokeniser, and `.cmd` files won't spawn as PE binaries. So
     we emit two forward-slash, unquoted paths separated by a single space.
 
-    Assumes both `sys.executable` and the install dir are space-free, which
-    holds for typical installs (`%LOCALAPPDATA%\\Programs\\Python\\PythonXX`
-    and `~\\.claude\\plugins\\claude-usage-monitor`). If `sys.executable`
-    is at a spaced path (e.g. `C:\\Program Files\\Python313`), Claude Code's
-    tokeniser will split on the space and the statusline will not render.
+    Raises SystemExit if `sys.executable` or the install directory contains
+    a space, because the same tokeniser would split the command at that
+    space and silently leave the statusline blank -- the exact failure mode
+    this fallback exists to fix. Users on an all-users Python install
+    (`C:\\Program Files\\Python313`) or under a spaced profile name should
+    install Git Bash (so the bash launcher form is used) or reinstall under
+    a space-free path.
     """
     py = _to_posix(sys.executable)
     script = _to_posix(install_dir / "statusline.py")
+    if " " in py or " " in script:
+        raise SystemExit(
+            "Cannot emit the Windows python fallback: a space in "
+            "sys.executable or the install directory would be split by "
+            "Claude Code's bash-style statusLine tokeniser, leaving the "
+            "statusline blank.\n"
+            f"  python: {py}\n"
+            f"  script: {script}\n"
+            "Install Git Bash (the installer will then use the bash "
+            "launcher form), or reinstall Python or the plugin under a "
+            "space-free path."
+        )
     return f"{py} {script}"
 
 
 def build_status_command(install_dir: Path) -> str:
+    # _use_bash_launcher() returns True on every posix host, so the bash
+    # branch is the only reachable path off Windows. On Windows it returns
+    # False only when bash is absent or the probe fails, in which case the
+    # nt branch below handles it. There is no other reachable case.
     if _use_bash_launcher():
         sh_arg = _bash_script_arg(install_dir)
         if os.name == "nt":
@@ -158,9 +176,7 @@ def build_status_command(install_dir: Path) -> str:
             # as one argument across spaces, and bash receives it intact.
             return f'bash "{sh_arg}"'
         return f"bash {shlex.quote(sh_arg)}"
-    if os.name == "nt":
-        return _windows_python_command(install_dir)
-    return str(install_dir / "statusline.cmd")
+    return _windows_python_command(install_dir)
 
 
 def build_verify_command(install_dir: Path) -> str:
@@ -169,9 +185,7 @@ def build_verify_command(install_dir: Path) -> str:
         if os.name == "nt":
             return f'printf "" | bash "{sh_arg}"'
         return f"printf '' | bash {shlex.quote(sh_arg)}"
-    if os.name == "nt":
-        return f"type nul | {_windows_python_command(install_dir)}"
-    return f'type nul | "{install_dir / "statusline.cmd"}"'
+    return f"type nul | {_windows_python_command(install_dir)}"
 
 
 def load_settings(path: Path) -> tuple[dict, str]:
@@ -227,10 +241,8 @@ def verify_install(install_dir: Path) -> tuple[bool, str]:
     # we write, so verification and configuration can't silently diverge.
     if _use_bash_launcher():
         command = ["bash", _bash_script_arg(install_dir)]
-    elif os.name == "nt":
-        command = [sys.executable, str(install_dir / "statusline.py")]
     else:
-        command = ["cmd", "/c", str(install_dir / "statusline.cmd")]
+        command = [sys.executable, str(install_dir / "statusline.py")]
 
     try:
         proc = subprocess.run(
