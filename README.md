@@ -214,7 +214,17 @@ Or update `~/.claude/settings.json` yourself:
 }
 ```
 
-On Windows, use the absolute path to `statusline.cmd` instead.
+On Windows, prefer `bash` with forward-slash paths when Git Bash is on PATH. When it isn't, point directly at `python.exe` and `statusline.py` — Claude Code on Windows parses this field bash-style, so backslashes are eaten and `.cmd` files don't spawn:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "C:/Users/you/AppData/Local/Programs/Python/Python313/python.exe C:/Users/you/.claude/plugins/claude-usage-monitor/statusline.py",
+    "padding": 0
+  }
+}
+```
 
 ## Uninstall
 

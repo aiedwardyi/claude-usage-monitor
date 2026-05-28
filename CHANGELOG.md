@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- On Windows, when bash was not on PATH the installer wrote a bare `.cmd` path into `settings.json`. On Claude Code 2.1.x that command field is parsed bash-style (backslashes are eaten as escapes, `.cmd` is not a PE binary), so the spawn silently produced no output and the statusline never rendered. The installer now falls back to a direct `<sys.executable> <install_dir>/statusline.py` command with both paths normalised to forward slashes, which Claude Code parses and executes correctly. The bash-on-PATH form is unchanged.
+- `verify_install` and `build_verify_command` now exercise and print the same python-fallback shape, so the launcher check matches what gets written into `settings.json` on Windows hosts without bash.
+
 ## v0.1.5
 
 ### Fixed

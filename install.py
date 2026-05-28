@@ -76,12 +76,14 @@ def copy_runtime_files(source_dir: Path, install_dir: Path) -> list[Path]:
 def _use_bash_launcher() -> bool:
     """Whether the installed statusLine launcher should run via bash.
 
-    On posix we always use bash. On Windows we use bash when a working bash is
-    on PATH so Claude Code installs that spawn statusLine through a bash-style
-    shell (e.g. Git Bash, where `.cmd` is not executable and the command
-    silently produces no output) still render. Hosts without a working bash
-    fall back to the bare `.cmd` launcher, which works under cmd and
-    PowerShell.
+    On posix we always use bash. On Windows we use bash when a working bash
+    is on PATH so Claude Code installs that spawn statusLine through a
+    bash-style shell (e.g. Git Bash) still render. Hosts without a working
+    bash fall back to a direct `python.exe statusline.py` invocation via
+    `_windows_python_command`, because Claude Code on Windows cannot spawn
+    a `.cmd` file via the statusLine command field (its tokeniser parses
+    the field bash-style: backslashes are eaten as escapes, and `.cmd` is
+    not a PE binary).
 
     The probe (`bash -c "exit 0"`) is necessary because the WSL stub at
     `C:\\Windows\\System32\\bash.exe` is on PATH on most modern Windows installs
@@ -102,6 +104,17 @@ def _use_bash_launcher() -> bool:
     return result.returncode == 0
 
 
+def _to_posix(path) -> str:
+    """Force forward slashes in a path string.
+
+    Claude Code on Windows parses statusLine.command bash-style, so any
+    backslash in an emitted path is eaten as an escape character and the
+    resulting command silently fails to spawn. Routing every Windows path
+    we emit through this helper keeps that invariant in one place.
+    """
+    return str(path).replace("\\", "/")
+
+
 def _bash_script_arg(install_dir: Path) -> str:
     """Path to statusline.sh for use as a bash argument.
 
@@ -114,8 +127,27 @@ def _bash_script_arg(install_dir: Path) -> str:
     """
     sh_path = str(install_dir / "statusline.sh")
     if os.name == "nt":
-        sh_path = sh_path.replace("\\", "/")
+        sh_path = _to_posix(sh_path)
     return sh_path
+
+
+def _windows_python_command(install_dir: Path) -> str:
+    """Direct `python.exe statusline.py` invocation for Windows without bash.
+
+    Claude Code on Windows parses statusLine.command bash-style: backslashes
+    in paths are eaten as escape characters, quoting spaced paths does not
+    survive the tokeniser, and `.cmd` files won't spawn as PE binaries. So
+    we emit two forward-slash, unquoted paths separated by a single space.
+
+    Assumes both `sys.executable` and the install dir are space-free, which
+    holds for typical installs (`%LOCALAPPDATA%\\Programs\\Python\\PythonXX`
+    and `~\\.claude\\plugins\\claude-usage-monitor`). If `sys.executable`
+    is at a spaced path (e.g. `C:\\Program Files\\Python313`), Claude Code's
+    tokeniser will split on the space and the statusline will not render.
+    """
+    py = _to_posix(sys.executable)
+    script = _to_posix(install_dir / "statusline.py")
+    return f"{py} {script}"
 
 
 def build_status_command(install_dir: Path) -> str:
@@ -126,6 +158,8 @@ def build_status_command(install_dir: Path) -> str:
             # as one argument across spaces, and bash receives it intact.
             return f'bash "{sh_arg}"'
         return f"bash {shlex.quote(sh_arg)}"
+    if os.name == "nt":
+        return _windows_python_command(install_dir)
     return str(install_dir / "statusline.cmd")
 
 
@@ -135,6 +169,8 @@ def build_verify_command(install_dir: Path) -> str:
         if os.name == "nt":
             return f'printf "" | bash "{sh_arg}"'
         return f"printf '' | bash {shlex.quote(sh_arg)}"
+    if os.name == "nt":
+        return f"type nul | {_windows_python_command(install_dir)}"
     return f'type nul | "{install_dir / "statusline.cmd"}"'
 
 
@@ -191,6 +227,8 @@ def verify_install(install_dir: Path) -> tuple[bool, str]:
     # we write, so verification and configuration can't silently diverge.
     if _use_bash_launcher():
         command = ["bash", _bash_script_arg(install_dir)]
+    elif os.name == "nt":
+        command = [sys.executable, str(install_dir / "statusline.py")]
     else:
         command = ["cmd", "/c", str(install_dir / "statusline.cmd")]
 

@@ -23,6 +23,9 @@ def _bash_launcher_expected() -> bool:
     # current host. On posix this is always True; on Windows it requires a
     # bash on PATH whose `bash -c "exit 0"` probe succeeds (so the WSL stub
     # without a Linux distro installed is correctly classified as unusable).
+    # When False on Windows, the installer falls back to a direct
+    # `python.exe statusline.py` command (not `.cmd`) because Claude Code's
+    # statusLine spawn can't execute `.cmd` files.
     if os.name != "nt":
         return True
     if not shutil.which("bash"):
@@ -166,12 +169,17 @@ def smoke_installer():
         command = settings.get("statusLine", {}).get("command", "")
         # On Windows the installer prefers the bash-form launcher when a
         # working bash is present (probed at install time) and falls back to
-        # the bare `.cmd` path otherwise. Use the same helper install.py uses
-        # so CI runners where `bash` on PATH is a broken WSL stub expect the
-        # `.cmd` form rather than the bash form.
-        expected_fragment = "statusline.sh" if _bash_launcher_expected() else "statusline.cmd"
+        # a direct `python.exe statusline.py` command otherwise. Use the
+        # same helper install.py uses so CI runners where `bash` on PATH is
+        # a broken WSL stub expect the python fallback.
+        expected_fragment = "statusline.sh" if _bash_launcher_expected() else "statusline.py"
         if expected_fragment not in command:
             raise AssertionError(f"unexpected installed command: {command}")
+        if os.name == "nt" and "\\" in command:
+            raise AssertionError(
+                f"Windows command must use forward slashes (Claude Code "
+                f"parses statusLine bash-style and eats backslashes): {command}"
+            )
 
         backup_path = settings_path.with_suffix(".json.bak")
         if not backup_path.exists():
@@ -239,7 +247,7 @@ def smoke_windows_install_wrapper():
 
         settings = json.loads(settings_path.read_text(encoding="utf-8"))
         command = settings.get("statusLine", {}).get("command", "")
-        expected_fragment = "statusline.sh" if _bash_launcher_expected() else "statusline.cmd"
+        expected_fragment = "statusline.sh" if _bash_launcher_expected() else "statusline.py"
         if expected_fragment not in command:
             raise AssertionError(f"unexpected install.ps1 command: {command}")
 
@@ -308,8 +316,12 @@ def smoke_build_status_command():
     #     (works under cmd, PowerShell, and bash; needed for hosts where
     #     Claude Code spawns statusLine through a bash shell that does not
     #     recognise `.cmd`)
-    #   - nt + no bash (or only a broken `bash.exe`, e.g. the WSL stub with no
-    #     distro installed): path to `<install_dir>\statusline.cmd` fallback.
+    #   - nt + no usable bash: `<sys.executable> <install_dir>/statusline.py`
+    #     with both paths forced to forward slashes. The bare `.cmd` form is
+    #     never written on Windows because Claude Code's statusLine spawn
+    #     can't execute `.cmd` files (its tokeniser parses the command
+    #     bash-style: backslashes are eaten as escapes and `.cmd` is not a
+    #     PE binary).
     import importlib.util
     from types import SimpleNamespace
     from unittest import mock
@@ -332,6 +344,9 @@ def smoke_build_status_command():
     probe_ok = lambda *a, **k: SimpleNamespace(returncode=0)
     probe_fail = lambda *a, **k: SimpleNamespace(returncode=1)
     probe_raises_oserror = lambda *a, **k: (_ for _ in ()).throw(OSError("simulated spawn failure"))
+    # Per-user Python install path with no spaces — matches the layout
+    # install.py picks up via sys.executable on a typical Windows host.
+    fake_python = r"C:\Users\test\AppData\Local\Programs\Python\Python313\python.exe"
 
     # nt + working bash -> bash form, forward slashes, double-quoted.
     with mock.patch.object(install_mod, "os", SimpleNamespace(name="nt")), \
@@ -344,30 +359,43 @@ def smoke_build_status_command():
             raise AssertionError(f"nt+bash command should use forward slashes, got: {cmd}")
 
     # nt + bash on PATH but probe fails (e.g. WSL stub without a distro)
-    # -> treat as no usable bash and fall back to `.cmd`.
+    # -> treat as no usable bash and fall back to direct python invocation.
     with mock.patch.object(install_mod, "os", SimpleNamespace(name="nt")), \
          mock.patch.object(install_mod.shutil, "which", bash_present), \
-         mock.patch.object(install_mod.subprocess, "run", probe_fail):
+         mock.patch.object(install_mod.subprocess, "run", probe_fail), \
+         mock.patch.object(install_mod.sys, "executable", fake_python):
         cmd = install_mod.build_status_command(nt_install_dir)
-        if not cmd.endswith("statusline.cmd"):
-            raise AssertionError(f"nt+broken-bash should fall back to .cmd, got: {cmd}")
+        if "statusline.py" not in cmd:
+            raise AssertionError(f"nt+broken-bash should fall back to python form, got: {cmd}")
+        if "python.exe" not in cmd:
+            raise AssertionError(f"nt fallback should invoke python.exe directly, got: {cmd}")
+        if "\\" in cmd:
+            raise AssertionError(f"nt fallback should use forward slashes, got: {cmd}")
+        if "statusline.cmd" in cmd:
+            raise AssertionError(f"nt fallback must not reference statusline.cmd, got: {cmd}")
 
-    # nt + probe raises OSError -> treat as no usable bash.
+    # nt + probe raises OSError -> treat as no usable bash, python fallback.
     with mock.patch.object(install_mod, "os", SimpleNamespace(name="nt")), \
          mock.patch.object(install_mod.shutil, "which", bash_present), \
-         mock.patch.object(install_mod.subprocess, "run", probe_raises_oserror):
+         mock.patch.object(install_mod.subprocess, "run", probe_raises_oserror), \
+         mock.patch.object(install_mod.sys, "executable", fake_python):
         cmd = install_mod.build_status_command(nt_install_dir)
-        if not cmd.endswith("statusline.cmd"):
-            raise AssertionError(f"nt+probe-raises should fall back to .cmd, got: {cmd}")
+        if "statusline.py" not in cmd:
+            raise AssertionError(f"nt+probe-raises should fall back to python form, got: {cmd}")
+        if "\\" in cmd:
+            raise AssertionError(f"nt+probe-raises should use forward slashes, got: {cmd}")
 
-    # nt without bash -> bare `.cmd` fallback (probe not reached).
+    # nt without bash -> python fallback (probe not reached).
     with mock.patch.object(install_mod, "os", SimpleNamespace(name="nt")), \
-         mock.patch.object(install_mod.shutil, "which", bash_absent):
+         mock.patch.object(install_mod.shutil, "which", bash_absent), \
+         mock.patch.object(install_mod.sys, "executable", fake_python):
         cmd = install_mod.build_status_command(nt_install_dir)
-        if not cmd.endswith("statusline.cmd"):
-            raise AssertionError(f"nt without bash should fall back to .cmd, got: {cmd}")
+        if "statusline.py" not in cmd:
+            raise AssertionError(f"nt without bash should use python fallback, got: {cmd}")
         if cmd.startswith("bash"):
             raise AssertionError(f"nt without bash should not invoke bash, got: {cmd}")
+        if "\\" in cmd:
+            raise AssertionError(f"nt without bash should use forward slashes, got: {cmd}")
 
     # posix -> always bash form (shlex.quote, never depends on which() or probe).
     with mock.patch.object(install_mod, "os", SimpleNamespace(name="posix")), \
