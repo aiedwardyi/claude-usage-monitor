@@ -104,7 +104,7 @@ def _use_bash_launcher() -> bool:
     return result.returncode == 0
 
 
-def _to_posix(path) -> str:
+def _to_posix(path: str | Path) -> str:
     """Force forward slashes in a path string.
 
     Claude Code on Windows parses statusLine.command bash-style, so any
@@ -165,10 +165,8 @@ def _windows_python_command(install_dir: Path) -> str:
 
 
 def build_status_command(install_dir: Path) -> str:
-    # _use_bash_launcher() returns True on every posix host, so the bash
-    # branch is the only reachable path off Windows. On Windows it returns
-    # False only when bash is absent or the probe fails, in which case the
-    # nt branch below handles it. There is no other reachable case.
+    # No posix fallback below: _use_bash_launcher() returns False only on
+    # Windows, so the trailing python-command return always handles that case.
     if _use_bash_launcher():
         sh_arg = _bash_script_arg(install_dir)
         if os.name == "nt":
