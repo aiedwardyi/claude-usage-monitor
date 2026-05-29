@@ -131,13 +131,15 @@ def _bash_script_arg(install_dir: Path) -> str:
     return sh_path
 
 
-# Characters Claude Code's bash-style statusLine tokeniser does not parse
-# literally in an unquoted path: whitespace splits the command, and the quote
-# and substitution metacharacters open a span that swallows the rest of the
-# line. Any of them mangles the emitted command the same way a space does, so
-# the python fallback refuses to emit one. Backslashes never reach this check
-# because _to_posix has already turned them into forward slashes.
-_LAUNCHER_UNSAFE_CHARS = " \t'\"`$"
+# Path punctuation safe to emit in an unquoted, bash-tokenised command. With
+# the ASCII letters and digits (checked separately) this covers every standard
+# Windows install path (`C:/Users/<name>/AppData/.../python.exe` and
+# `~/.claude/plugins/claude-usage-monitor/statusline.py`). Non-ASCII characters
+# are allowed too because Claude Code's bash-style tokeniser treats them
+# literally. Allowlisting means a stray space, quote, `&`, `;`, or `(` can
+# never slip through the way it could with a denylist. Backslashes never reach
+# the check because _to_posix has already turned them into forward slashes.
+_LAUNCHER_SAFE_PUNCT = "/:._-"
 
 
 def _windows_python_command(install_dir: Path) -> str:
@@ -153,19 +155,23 @@ def _windows_python_command(install_dir: Path) -> str:
     Without it the default Windows locale (cp1252) mangles or fails to decode
     a payload with non-ASCII workspace data, which blanks the statusline.
 
-    Raises SystemExit if `sys.executable` or the install directory contains a
-    space or any other shell metacharacter (see `_LAUNCHER_UNSAFE_CHARS`),
-    because the tokeniser would not parse the unquoted command literally and
-    would silently leave the statusline blank -- the exact failure mode this
-    fallback exists to fix. An all-users Python install (`C:\\Program
-    Files\\Python313`) trips the space check; a profile name like
-    `C:\\Users\\O'Connor` trips the quote check. Either way the user should
-    install Git Bash (so the bash launcher form is used) or reinstall under a
-    path free of spaces and shell metacharacters.
+    Raises SystemExit if `sys.executable` or the install directory contains an
+    ASCII character outside the alphanumerics and `_LAUNCHER_SAFE_PUNCT` (a
+    space, quote, `&`, `;`, `(`, and so on), because the tokeniser would not
+    parse the unquoted command literally and would silently leave the
+    statusline blank -- the exact failure mode this fallback exists to fix. An
+    all-users Python install (`C:\\Program Files\\Python313`) trips on the
+    space; a profile like `C:\\Users\\O'Connor` on the quote; an install dir
+    like `C:\\Tools\\R&D` on the ampersand. Either way the user should install
+    Git Bash (so the bash launcher form is used) or reinstall under a path made
+    of ordinary characters.
     """
     py = _to_posix(sys.executable)
     script = _to_posix(install_dir / "statusline.py")
-    bad = sorted({c for c in py + script if c in _LAUNCHER_UNSAFE_CHARS})
+    bad = sorted(
+        {c for c in py + script
+         if ord(c) < 128 and not c.isalnum() and c not in _LAUNCHER_SAFE_PUNCT}
+    )
     if bad:
         raise SystemExit(
             f"Cannot emit the Windows python fallback: a path contains {bad!r}, "
@@ -175,8 +181,8 @@ def _windows_python_command(install_dir: Path) -> str:
             f"  python: {py}\n"
             f"  script: {script}\n"
             "Install Git Bash (the installer will then use the bash launcher "
-            "form), or reinstall Python or the plugin under a path free of "
-            "spaces and shell metacharacters."
+            "form), or reinstall Python or the plugin under a path made of "
+            "ordinary characters (letters, digits, and / : . _ -)."
         )
     return f"{py} -X utf8 {script}"
 
@@ -257,6 +263,8 @@ def verify_install(install_dir: Path) -> tuple[bool, str]:
     if _use_bash_launcher():
         command = ["bash", _bash_script_arg(install_dir)]
     else:
+        # No _to_posix here: the list form goes straight to the OS, not through
+        # the bash-style tokeniser, so backslashes resolve fine.
         command = [sys.executable, "-X", "utf8", str(install_dir / "statusline.py")]
 
     try:

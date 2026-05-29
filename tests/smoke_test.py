@@ -376,6 +376,16 @@ def smoke_build_status_command():
         if "statusline.cmd" in cmd:
             raise AssertionError(f"nt fallback must not reference statusline.cmd, got: {cmd}")
 
+        # build_verify_command shares _windows_python_command, so the verify
+        # form must carry the same py / forward-slash / -X utf8 / no-.cmd shape.
+        vcmd = install_mod.build_verify_command(nt_install_dir)
+        if "statusline.py" not in vcmd or "-X utf8" not in vcmd:
+            raise AssertionError(f"nt verify command should use the python+utf8 form, got: {vcmd}")
+        if "type nul" not in vcmd:
+            raise AssertionError(f"nt verify command should pipe empty stdin via type nul, got: {vcmd}")
+        if "\\" in vcmd or "statusline.cmd" in vcmd:
+            raise AssertionError(f"nt verify command should be forward-slash python form, got: {vcmd}")
+
     # nt + probe raises OSError -> treat as no usable bash, python fallback.
     with mock.patch.object(install_mod, "os", SimpleNamespace(name="nt")), \
          mock.patch.object(install_mod.shutil, "which", bash_present), \
@@ -427,13 +437,18 @@ def smoke_windows_python_command_unsafe_path_guard():
     )
     fine_python = r"C:\Users\test\AppData\Local\Programs\Python\Python313\python.exe"
 
-    # All-users Python (space) and an apostrophe profile name are the two
-    # realistic ways a default install trips the guard.
+    # All-users Python (space), an apostrophe profile name, and a control
+    # character like `&` in a custom install dir are realistic ways the guard
+    # trips. The allowlist rejects any ASCII char outside letters, digits, and
+    # / : . _ - so it cannot silently pass a new metacharacter.
     spaced_install_dir = pathlib.PureWindowsPath(
         r"C:\Users\Test User\.claude\plugins\claude-usage-monitor"
     )
     quoted_install_dir = pathlib.PureWindowsPath(
         r"C:\Users\O'Connor\.claude\plugins\claude-usage-monitor"
+    )
+    ampersand_install_dir = pathlib.PureWindowsPath(
+        r"C:\Tools\R&D\claude-usage-monitor"
     )
     spaced_python = r"C:\Program Files\Python313\python.exe"
 
@@ -444,6 +459,7 @@ def smoke_windows_python_command_unsafe_path_guard():
         ("spaced sys.executable", spaced_python, fine_install_dir, "py"),
         ("spaced install dir", fine_python, spaced_install_dir, "dir"),
         ("apostrophe in install dir", fine_python, quoted_install_dir, "dir"),
+        ("ampersand in install dir", fine_python, ampersand_install_dir, "dir"),
     ]
     for label, py_path, inst_dir, offender in unsafe_cases:
         with mock.patch.object(install_mod.sys, "executable", py_path):
@@ -473,6 +489,18 @@ def smoke_windows_python_command_unsafe_path_guard():
         if "\\" in cmd:
             raise AssertionError(
                 f"clean command should use forward slashes, got: {cmd}"
+            )
+
+    # Non-ASCII paths are allowed: the bash-style tokeniser treats them
+    # literally and -X utf8 decodes them, so the guard must not reject them.
+    accented_install_dir = pathlib.PureWindowsPath(
+        "C:\\Users\\José\\.claude\\plugins\\claude-usage-monitor"
+    )
+    with mock.patch.object(install_mod.sys, "executable", fine_python):
+        cmd = install_mod._windows_python_command(accented_install_dir)
+        if "statusline.py" not in cmd or "-X utf8" not in cmd:
+            raise AssertionError(
+                f"non-ASCII path should still emit the python command, got: {cmd}"
             )
 
 
