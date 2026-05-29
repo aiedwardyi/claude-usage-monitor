@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.1.6
 
 ### Fixed
 - On Windows, when bash was not on PATH the installer wrote a bare `.cmd` path into `settings.json`. On Claude Code 2.1.x that command field is parsed bash-style (backslashes are eaten as escapes, `.cmd` is not a PE binary), so the spawn silently produced no output and the statusline never rendered. The installer now falls back to a direct `<sys.executable> <install_dir>/statusline.py` command with both paths normalised to forward slashes, which Claude Code parses and executes correctly. The emitted command includes `-X utf8` so Python decodes the stdin payload as UTF-8 (the `.cmd` wrapper set this via environment); without it a non-ASCII workspace path rendered as mojibake or blanked the line. The fallback aborts with a clear message if either path contains a space or any other character outside the ordinary path set of letters, digits, and `/ : . _ -` (an all-users Python install at `C:\Program Files\Python313`, a profile name like `C:\Users\O'Connor`, or an install dir like `C:\Tools\R&D`), since the tokeniser would not parse the unquoted command literally and would reintroduce the silent failure. Non-ASCII path characters are allowed because the tokeniser treats them literally. The bash-on-PATH form is unchanged.
