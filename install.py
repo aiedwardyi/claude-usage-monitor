@@ -131,35 +131,47 @@ def _bash_script_arg(install_dir: Path) -> str:
     return sh_path
 
 
+# Characters Claude Code's bash-style statusLine tokeniser does not parse
+# literally in an unquoted path: whitespace splits the command, and the quote
+# and substitution metacharacters open a span that swallows the rest of the
+# line. Any of them mangles the emitted command the same way a space does, so
+# the python fallback refuses to emit one. Backslashes never reach this check
+# because _to_posix has already turned them into forward slashes.
+_LAUNCHER_UNSAFE_CHARS = " \t'\"`$"
+
+
 def _windows_python_command(install_dir: Path) -> str:
     """Direct `python.exe statusline.py` invocation for Windows without bash.
 
     Claude Code on Windows parses statusLine.command bash-style: backslashes
-    in paths are eaten as escape characters, quoting spaced paths does not
-    survive the tokeniser, and `.cmd` files won't spawn as PE binaries. So
-    we emit two forward-slash, unquoted paths separated by a single space.
+    in paths are eaten as escape characters, quoting paths does not survive
+    the tokeniser, and `.cmd` files won't spawn as PE binaries. So we emit
+    two forward-slash, unquoted paths separated by a single space.
 
-    Raises SystemExit if `sys.executable` or the install directory contains
-    a space, because the same tokeniser would split the command at that
-    space and silently leave the statusline blank -- the exact failure mode
-    this fallback exists to fix. Users on an all-users Python install
-    (`C:\\Program Files\\Python313`) or under a spaced profile name should
-    install Git Bash (so the bash launcher form is used) or reinstall under
-    a space-free path.
+    Raises SystemExit if `sys.executable` or the install directory contains a
+    space or any other shell metacharacter (see `_LAUNCHER_UNSAFE_CHARS`),
+    because the tokeniser would not parse the unquoted command literally and
+    would silently leave the statusline blank -- the exact failure mode this
+    fallback exists to fix. An all-users Python install (`C:\\Program
+    Files\\Python313`) trips the space check; a profile name like
+    `C:\\Users\\O'Connor` trips the quote check. Either way the user should
+    install Git Bash (so the bash launcher form is used) or reinstall under a
+    path free of spaces and shell metacharacters.
     """
     py = _to_posix(sys.executable)
     script = _to_posix(install_dir / "statusline.py")
-    if " " in py or " " in script:
+    bad = sorted({c for c in py + script if c in _LAUNCHER_UNSAFE_CHARS})
+    if bad:
         raise SystemExit(
-            "Cannot emit the Windows python fallback: a space in "
-            "sys.executable or the install directory would be split by "
-            "Claude Code's bash-style statusLine tokeniser, leaving the "
-            "statusline blank.\n"
+            f"Cannot emit the Windows python fallback: a path contains {bad!r}, "
+            "which Claude Code's bash-style statusLine tokeniser does not parse "
+            "literally, so the command would be mangled and the statusline "
+            "would stay blank.\n"
             f"  python: {py}\n"
             f"  script: {script}\n"
-            "Install Git Bash (the installer will then use the bash "
-            "launcher form), or reinstall Python or the plugin under a "
-            "space-free path."
+            "Install Git Bash (the installer will then use the bash launcher "
+            "form), or reinstall Python or the plugin under a path free of "
+            "spaces and shell metacharacters."
         )
     return f"{py} {script}"
 

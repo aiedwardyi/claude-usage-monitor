@@ -407,11 +407,12 @@ def smoke_build_status_command():
             raise AssertionError(f"posix command should reference statusline.sh, got: {cmd}")
 
 
-def smoke_windows_python_command_spaced_path_guard():
+def smoke_windows_python_command_unsafe_path_guard():
     # _windows_python_command must refuse to emit a command when sys.executable
-    # or the install dir contains a space. Claude Code's bash-style statusLine
-    # tokeniser would split at the space and leave the statusline blank --
-    # the exact failure mode this fallback exists to fix.
+    # or the install dir contains a space or any other shell metacharacter.
+    # Claude Code's bash-style statusLine tokeniser would not parse the
+    # unquoted path literally and would leave the statusline blank -- the exact
+    # failure mode this fallback exists to fix.
     import importlib.util
     from unittest import mock
 
@@ -422,55 +423,51 @@ def smoke_windows_python_command_spaced_path_guard():
     fine_install_dir = pathlib.PureWindowsPath(
         r"C:\Users\test\.claude\plugins\claude-usage-monitor"
     )
+    fine_python = r"C:\Users\test\AppData\Local\Programs\Python\Python313\python.exe"
+
+    # All-users Python (space) and an apostrophe profile name are the two
+    # realistic ways a default install trips the guard.
     spaced_install_dir = pathlib.PureWindowsPath(
         r"C:\Users\Test User\.claude\plugins\claude-usage-monitor"
     )
-    fine_python = r"C:\Users\test\AppData\Local\Programs\Python\Python313\python.exe"
+    quoted_install_dir = pathlib.PureWindowsPath(
+        r"C:\Users\O'Connor\.claude\plugins\claude-usage-monitor"
+    )
     spaced_python = r"C:\Program Files\Python313\python.exe"
 
-    # Spaced sys.executable -> SystemExit with a useful message.
-    with mock.patch.object(install_mod.sys, "executable", spaced_python):
-        try:
-            install_mod._windows_python_command(fine_install_dir)
-        except SystemExit as exc:
-            message = str(exc)
-            if "space" not in message.lower():
-                raise AssertionError(
-                    f"spaced python guard should mention 'space', got: {message}"
-                )
-            if spaced_python.replace("\\", "/") not in message:
-                raise AssertionError(
-                    f"spaced python guard should include the offending path, got: {message}"
-                )
-        else:
-            raise AssertionError(
-                "spaced sys.executable should raise SystemExit"
-            )
+    # (label, python path, install dir) -> each must raise SystemExit and name
+    # the offending path so the user can see what to fix.
+    unsafe_cases = [
+        ("spaced sys.executable", spaced_python, fine_install_dir),
+        ("spaced install dir", fine_python, spaced_install_dir),
+        ("apostrophe in install dir", fine_python, quoted_install_dir),
+    ]
+    for label, py_path, inst_dir in unsafe_cases:
+        with mock.patch.object(install_mod.sys, "executable", py_path):
+            try:
+                install_mod._windows_python_command(inst_dir)
+            except SystemExit as exc:
+                message = str(exc)
+                offending_py = py_path.replace("\\", "/")
+                offending_dir = str(inst_dir).replace("\\", "/")
+                if offending_py not in message and offending_dir not in message:
+                    raise AssertionError(
+                        f"{label}: guard message should include the offending "
+                        f"path, got: {message}"
+                    )
+            else:
+                raise AssertionError(f"{label}: should raise SystemExit")
 
-    # Spaced install dir -> SystemExit.
-    with mock.patch.object(install_mod.sys, "executable", fine_python):
-        try:
-            install_mod._windows_python_command(spaced_install_dir)
-        except SystemExit as exc:
-            if "space" not in str(exc).lower():
-                raise AssertionError(
-                    f"spaced install dir guard should mention 'space', got: {exc}"
-                )
-        else:
-            raise AssertionError(
-                "spaced install dir should raise SystemExit"
-            )
-
-    # Sanity: space-free paths still produce a usable command.
+    # Sanity: clean paths still produce a usable forward-slash command.
     with mock.patch.object(install_mod.sys, "executable", fine_python):
         cmd = install_mod._windows_python_command(fine_install_dir)
         if "python.exe" not in cmd or "statusline.py" not in cmd:
             raise AssertionError(
-                f"space-free paths should produce python command, got: {cmd}"
+                f"clean paths should produce python command, got: {cmd}"
             )
         if "\\" in cmd:
             raise AssertionError(
-                f"space-free command should use forward slashes, got: {cmd}"
+                f"clean command should use forward slashes, got: {cmd}"
             )
 
 
@@ -598,7 +595,7 @@ def main():
     smoke_windows_install_wrapper()
     smoke_windows_install_pipe()
     smoke_build_status_command()
-    smoke_windows_python_command_spaced_path_guard()
+    smoke_windows_python_command_unsafe_path_guard()
     smoke_bar_toggle()
     smoke_overflow()
     print("smoke tests passed")
