@@ -134,7 +134,7 @@ The first render may show `5h: --` and `7d: --` until the background fetch compl
 
 | Platform | Launcher | Status |
 |---|---|---|
-| Windows 11 | `statusline.cmd` | Tested |
+| Windows 10 / 11 | `statusline.py` | Tested |
 | macOS | `statusline.sh` | Tested in CI |
 | Linux | `statusline.sh` | Tested in CI |
 
