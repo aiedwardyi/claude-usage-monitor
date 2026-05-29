@@ -369,6 +369,8 @@ def smoke_build_status_command():
             raise AssertionError(f"nt+broken-bash should fall back to python form, got: {cmd}")
         if "python.exe" not in cmd:
             raise AssertionError(f"nt fallback should invoke python.exe directly, got: {cmd}")
+        if "-X utf8" not in cmd:
+            raise AssertionError(f"nt fallback should enable Python UTF-8 mode, got: {cmd}")
         if "\\" in cmd:
             raise AssertionError(f"nt fallback should use forward slashes, got: {cmd}")
         if "statusline.cmd" in cmd:
@@ -435,25 +437,28 @@ def smoke_windows_python_command_unsafe_path_guard():
     )
     spaced_python = r"C:\Program Files\Python313\python.exe"
 
-    # (label, python path, install dir) -> each must raise SystemExit and name
-    # the offending path so the user can see what to fix.
+    # (label, python path, install dir, which input carries the bad char) ->
+    # each must raise SystemExit and name the offending path so the user can
+    # see what to fix.
     unsafe_cases = [
-        ("spaced sys.executable", spaced_python, fine_install_dir),
-        ("spaced install dir", fine_python, spaced_install_dir),
-        ("apostrophe in install dir", fine_python, quoted_install_dir),
+        ("spaced sys.executable", spaced_python, fine_install_dir, "py"),
+        ("spaced install dir", fine_python, spaced_install_dir, "dir"),
+        ("apostrophe in install dir", fine_python, quoted_install_dir, "dir"),
     ]
-    for label, py_path, inst_dir in unsafe_cases:
+    for label, py_path, inst_dir, offender in unsafe_cases:
         with mock.patch.object(install_mod.sys, "executable", py_path):
             try:
                 install_mod._windows_python_command(inst_dir)
             except SystemExit as exc:
                 message = str(exc)
-                offending_py = py_path.replace("\\", "/")
-                offending_dir = str(inst_dir).replace("\\", "/")
-                if offending_py not in message and offending_dir not in message:
+                # Assert the specific offending path is named, not just either
+                # path: the message always prints both python and script, so a
+                # weaker "either appears" check could miss a dropped offender.
+                expected = (py_path if offender == "py" else str(inst_dir)).replace("\\", "/")
+                if expected not in message:
                     raise AssertionError(
-                        f"{label}: guard message should include the offending "
-                        f"path, got: {message}"
+                        f"{label}: guard message should name the offending path "
+                        f"{expected!r}, got: {message}"
                     )
             else:
                 raise AssertionError(f"{label}: should raise SystemExit")

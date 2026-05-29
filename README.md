@@ -214,13 +214,13 @@ Or update `~/.claude/settings.json` yourself:
 }
 ```
 
-On Windows, prefer `bash` with forward-slash paths when Git Bash is on PATH. When it isn't, point directly at `python.exe` and `statusline.py`. Claude Code on Windows parses this field bash-style, so backslashes are eaten, `.cmd` files don't spawn, and unquoted paths split on the first space. Both `python.exe` and the install directory must therefore be space-free (`%LOCALAPPDATA%\Programs\Python\Python313`, not the all-users `C:\Program Files\Python313`):
+On Windows, prefer `bash` with forward-slash paths when Git Bash is on PATH. When it isn't, point directly at `python.exe` and `statusline.py`. Claude Code on Windows parses this field bash-style, so backslashes are eaten, `.cmd` files don't spawn, and unquoted paths split on the first space. Both `python.exe` and the install directory must therefore be space-free (`%LOCALAPPDATA%\Programs\Python\Python313`, not the all-users `C:\Program Files\Python313`). The `-X utf8` flag keeps Python decoding the input as UTF-8 so non-ASCII workspace paths render correctly:
 
 ```json
 {
   "statusLine": {
     "type": "command",
-    "command": "C:/Users/you/AppData/Local/Programs/Python/Python313/python.exe C:/Users/you/.claude/plugins/claude-usage-monitor/statusline.py",
+    "command": "C:/Users/you/AppData/Local/Programs/Python/Python313/python.exe -X utf8 C:/Users/you/.claude/plugins/claude-usage-monitor/statusline.py",
     "padding": 0
   }
 }

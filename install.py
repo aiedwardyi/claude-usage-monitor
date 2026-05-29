@@ -148,6 +148,11 @@ def _windows_python_command(install_dir: Path) -> str:
     the tokeniser, and `.cmd` files won't spawn as PE binaries. So we emit
     two forward-slash, unquoted paths separated by a single space.
 
+    The `-X utf8` flag puts Python in UTF-8 mode so it decodes the stdin
+    payload as UTF-8, matching the `PYTHONUTF8=1` the `.cmd` wrapper sets.
+    Without it the default Windows locale (cp1252) mangles or fails to decode
+    a payload with non-ASCII workspace data, which blanks the statusline.
+
     Raises SystemExit if `sys.executable` or the install directory contains a
     space or any other shell metacharacter (see `_LAUNCHER_UNSAFE_CHARS`),
     because the tokeniser would not parse the unquoted command literally and
@@ -173,7 +178,7 @@ def _windows_python_command(install_dir: Path) -> str:
             "form), or reinstall Python or the plugin under a path free of "
             "spaces and shell metacharacters."
         )
-    return f"{py} {script}"
+    return f"{py} -X utf8 {script}"
 
 
 def build_status_command(install_dir: Path) -> str:
@@ -252,7 +257,7 @@ def verify_install(install_dir: Path) -> tuple[bool, str]:
     if _use_bash_launcher():
         command = ["bash", _bash_script_arg(install_dir)]
     else:
-        command = [sys.executable, str(install_dir / "statusline.py")]
+        command = [sys.executable, "-X", "utf8", str(install_dir / "statusline.py")]
 
     try:
         proc = subprocess.run(
