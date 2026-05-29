@@ -214,7 +214,7 @@ Or update `~/.claude/settings.json` yourself:
 }
 ```
 
-On Windows, prefer `bash` with forward-slash paths when Git Bash is on PATH. When it isn't, point directly at `python.exe` and `statusline.py` — Claude Code on Windows parses this field bash-style, so backslashes are eaten and `.cmd` files don't spawn:
+On Windows, prefer `bash` with forward-slash paths when Git Bash is on PATH. When it isn't, point directly at `python.exe` and `statusline.py`. Claude Code on Windows parses this field bash-style, so backslashes are eaten, `.cmd` files don't spawn, and unquoted paths split on the first space. Both `python.exe` and the install directory must therefore be space-free (`%LOCALAPPDATA%\Programs\Python\Python313`, not the all-users `C:\Program Files\Python313`):
 
 ```json
 {
