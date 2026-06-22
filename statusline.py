@@ -375,7 +375,8 @@ DIAMOND = "\u25c6"  # ◆
 
 # Context gauge (5 blocks)
 ctx_remaining = 100 - ctx_pct_used
-filled = round(min(100, max(0, ctx_remaining)) / 100.0 * 5)
+ctx_val = ctx_remaining if SHOW_REMAINING else ctx_pct_used
+filled = round(min(100, max(0, ctx_val)) / 100.0 * 5)
 gauge = "\u25b0" * filled + "\u25b1" * (5 - filled)  # ▰▱
 
 # Context size label
@@ -399,7 +400,7 @@ line1 = SEP.join(line1_parts)
 # Each segment is (text, priority) - lower priority number = more important (dropped last).
 # When the joined line exceeds MAX_WIDTH, the highest-numbered priorities are dropped first.
 ctx_color = color_pct(ctx_pct_used)
-ctx_str = f"{ctx_color}{gauge}{N} {ctx_remaining}%"
+ctx_str = f"{ctx_color}{gauge}{N} {ctx_val}%"
 if SHOW_CONTEXT_SIZE:
     ctx_str += f" of {ctx_label}"
 

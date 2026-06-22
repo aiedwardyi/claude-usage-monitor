@@ -43,13 +43,18 @@ def _bash_launcher_expected() -> bool:
 
 def run(command, stdin_text="", extra_env=None):
     env = os.environ.copy()
+    # Strip inherited CQB_* config so the suite is hermetic regardless of the
+    # developer's shell. A personal CQB_REMAINING=0 / CQB_CONTEXT_SIZE=1 must
+    # not change what the default-mode assertions see. Tests opt back into
+    # specific settings via the explicit defaults below and extra_env.
+    for key in [k for k in env if k.startswith("CQB_")]:
+        del env[key]
     env["CQB_TOKENS"] = "0"
     env["CQB_RESET"] = "0"
     env["CQB_DURATION"] = "0"
     env["CQB_BRANCH"] = "0"
     env["PYTHONIOENCODING"] = "utf-8"
     env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
-    env.pop("CQB_BAR", None)
     if extra_env:
         env.update(extra_env)
     proc = subprocess.run(
@@ -556,6 +561,118 @@ def smoke_bar_toggle():
             )
 
 
+def smoke_remaining_toggle():
+    # CQB_REMAINING must flip every gauge -- including the context gauge --
+    # between remaining % (default fuel gauge) and used %. Two invariants:
+    #   1. Displayed value: each gauge shows remaining % by default and used %
+    #      when CQB_REMAINING=0. Regression: the context gauge used to ignore
+    #      the toggle and always count down while the 5h/7d quotas switched.
+    #   2. Color: each gauge is colored by how much is USED (green <70, yellow
+    #      70-89, red >=90), regardless of which number is displayed. Flipping
+    #      the toggle changes the number and the bar fill direction but must not
+    #      change a gauge's color. A gauge colored off its displayed value would
+    #      flip color with the toggle, and is caught here.
+    import re
+    import time as _time
+
+    # ANSI codes emitted by statusline.py's color_pct().
+    GREEN, YELLOW, RED = "\033[32m", "\033[33m", "\033[31m"
+    NAME = {GREEN: "green", YELLOW: "yellow", RED: "red"}
+
+    # Used % chosen so the gauges span all three color bands AND each gauge's
+    # used band differs from its remaining band -- so a color keyed off the
+    # displayed (remaining) value would land in the wrong band and trip a check.
+    CTX_USED = 25  # green;  remaining 75 would read yellow if mis-keyed
+    H5_USED = 75   # yellow; remaining 25 would read green if mis-keyed
+    D7_USED = 95   # red;    remaining 5  would read green if mis-keyed
+
+    payload = {
+        "model": {"display_name": "Opus"},
+        "context_window": {
+            "used_percentage": CTX_USED,
+            "context_window_size": 200000,
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+        },
+        "cost": {"total_cost_usd": 0, "total_duration_ms": 0},
+        "workspace": {"project_dir": str(ROOT)},
+    }
+    stdin = json.dumps(payload)
+    ansi_re = re.compile(r"\033\[[0-9;]*m")
+
+    def segments(stdout):
+        # Line 2 is "context │ 5h │ 7d"; run() disables tokens/reset/duration/
+        # branch, so these are the only three segments. ANSI is kept so each
+        # segment's color can be read.
+        line2 = stdout.splitlines()[1]
+        return line2.split("│")
+
+    def assert_value(raw_segment, expected, label):
+        assert_contains(ansi_re.sub("", raw_segment), expected, label)
+
+    def assert_color(raw_segment, expected, label):
+        # color_pct() wraps each gauge, so the first ANSI code in the segment is
+        # the gauge's color.
+        match = ansi_re.search(raw_segment)
+        actual = match.group(0) if match else None
+        if actual != expected:
+            raise AssertionError(
+                f"{label}: expected {NAME[expected]} gauge, got "
+                f"{NAME.get(actual, repr(actual))}\nsegment:\n{raw_segment}"
+            )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        cache_file = os.path.join(tmp, "test-cache.json")
+        cache_data = json.dumps({
+            "five_hour_used": H5_USED,
+            "seven_day_used": D7_USED,
+            "five_hour_reset_min": 120,
+            "seven_day_reset_min": 4320,
+            "extra_enabled": False,
+            "extra_used": 0,
+            "extra_limit": 0,
+            "fetched_at": _time.time(),
+        })
+        pathlib.Path(cache_file).write_text(cache_data, encoding="utf-8")
+        cache_env = {"CQB_CACHE_PATH": cache_file}
+
+        # Remaining mode (default): every gauge counts down to its remaining %.
+        proc = run(
+            [sys.executable, str(STATUSLINE_PY)],
+            stdin,
+            extra_env={**cache_env, "CQB_REMAINING": "1"},
+        )
+        assert_ok(proc, "remaining mode")
+        ctx, h5, d7 = segments(proc.stdout)
+        assert_value(ctx, "75%", "remaining mode (context shows remaining)")
+        assert_value(h5, "25%", "remaining mode (5h shows remaining)")
+        assert_value(d7, "5%", "remaining mode (7d shows remaining)")
+        # Colors track USED %, not the displayed remaining %.
+        assert_color(ctx, GREEN, "remaining mode (context color tracks used)")
+        assert_color(h5, YELLOW, "remaining mode (5h color tracks used)")
+        assert_color(d7, RED, "remaining mode (7d color tracks used)")
+
+        # Used mode: every gauge -- including context -- flips to used %.
+        proc = run(
+            [sys.executable, str(STATUSLINE_PY)],
+            stdin,
+            extra_env={**cache_env, "CQB_REMAINING": "0"},
+        )
+        assert_ok(proc, "used mode")
+        ctx, h5, d7 = segments(proc.stdout)
+        assert_value(ctx, "25%", "used mode (context shows used)")
+        if "75%" in ansi_re.sub("", ctx):
+            raise AssertionError(
+                f"used mode: context gauge should show used %, not remaining\nsegment:\n{ctx}"
+            )
+        assert_value(h5, "75%", "used mode (5h shows used)")
+        assert_value(d7, "95%", "used mode (7d shows used)")
+        # Colors are unchanged by the toggle: still keyed off used %.
+        assert_color(ctx, GREEN, "used mode (context color tracks used)")
+        assert_color(h5, YELLOW, "used mode (5h color tracks used)")
+        assert_color(d7, RED, "used mode (7d color tracks used)")
+
+
 def smoke_overflow():
     import re
     import time as _time
@@ -630,6 +747,7 @@ def main():
     smoke_build_status_command()
     smoke_windows_python_command_unsafe_path_guard()
     smoke_bar_toggle()
+    smoke_remaining_toggle()
     smoke_overflow()
     print("smoke tests passed")
 
