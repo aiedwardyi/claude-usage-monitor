@@ -35,6 +35,7 @@ SHOW_BRANCH = os.environ.get("CQB_BRANCH", "1") == "1"
 SHOW_COST = os.environ.get("CQB_COST", "0") == "1"
 SHOW_REMAINING = os.environ.get("CQB_REMAINING", "1") == "1"
 SHOW_BAR = os.environ.get("CQB_BAR", "1") == "1"
+SHOW_EMAIL = os.environ.get("CQB_EMAIL", "0") == "1"
 MAX_WIDTH = int(os.environ.get("CQB_MAX_WIDTH", "80"))
 
 # ── Read stdin ──────────────────────────────────────────────────
@@ -118,6 +119,15 @@ try:
     proj_name = os.path.basename(proj_dir)
 except (KeyError, TypeError):
     pass
+
+# Account email (only for Anthropic OAuth logins; API-key logins have no oauthAccount)
+email = ""
+if SHOW_EMAIL:
+    try:
+        cfg = json.loads((Path.home() / ".claude.json").read_text(encoding="utf-8"))
+        email = cfg.get("oauthAccount", {}).get("emailAddress", "") or ""
+    except Exception:
+        pass
 
 # ── Git branch ──────────────────────────────────────────────────
 branch = ""
@@ -392,6 +402,9 @@ if proj_name:
     if len(loc) > 40:
         loc = loc[:39] + "\u2026"
     line1_parts.append(loc)
+
+if SHOW_EMAIL and email:
+    line1_parts.append(f"{D}{email}{N}")
 
 line1 = SEP.join(line1_parts)
 
