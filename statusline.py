@@ -23,6 +23,13 @@ from pathlib import Path
 if sys.stdout.encoding != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8")
 
+
+# Config home respects CLAUDE_CONFIG_DIR (set by tools like claude-swap),
+# mirroring claude-code: CLAUDE_CONFIG_DIR if set, else ~/.claude.
+def _config_home() -> Path:
+    env = os.environ.get("CLAUDE_CONFIG_DIR")
+    return Path(env) if env else Path.home() / ".claude"
+
 # ── Configuration (env vars) ─────────────────────────────────────
 # Set these in your shell profile or in Claude Code's settings.json env block.
 # Values: "1" = show, "0" = hide
@@ -231,7 +238,7 @@ def get_oauth_token():
     if tok:
         return tok
     # Credentials file
-    cred_path = Path.home() / ".claude" / ".credentials.json"
+    cred_path = _config_home() / ".credentials.json"
     if cred_path.exists():
         try:
             creds = json.loads(cred_path.read_text(encoding="utf-8"))
