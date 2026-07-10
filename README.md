@@ -161,10 +161,12 @@ Every segment is toggleable via environment variables. Set them in your shell pr
 | `CQB_CONTEXT_SIZE` | `0` | Show context size label such as `of 1M` |
 | `CQB_PACE` | `0` | Show pacing indicator |
 | `CQB_COST` | `0` | Show session cost |
-| `CQB_REMAINING` | `1` | Show remaining % (fuel gauge) for quotas; set `0` for used % |
+| `CQB_REMAINING` | `1` | Show remaining % (fuel gauge) for all gauges; set `0` for used % |
 | `CQB_BAR` | `1` | Show visual progress bar next to 5h/7d quotas |
 | `CQB_EMAIL` | `0` | Show the logged-in account email (Anthropic OAuth logins only; blank for API-key logins) |
 | `CQB_MAX_WIDTH` | `80` | Max status line width; low-priority segments (tokens, duration) drop when line overflows |
+
+Quota credentials are read from `CLAUDE_CONFIG_DIR` when set (as used by account-swap tools), falling back to `~/.claude`.
 
 ### Presets
 
