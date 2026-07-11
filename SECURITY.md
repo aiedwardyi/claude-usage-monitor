@@ -12,7 +12,7 @@ At runtime, `claude-usage-monitor` does the following:
 - Reads `~/.claude/.credentials.json` only to access `claudeAiOauth.accessToken`, unless `CLAUDE_CODE_OAUTH_TOKEN` is already set
 - Runs `git rev-parse --abbrev-ref HEAD` in the current project to show the active branch
 - Writes a cache file and lock file in your system temp directory:
-  `claude-sl-usage.json` and `claude-sl-usage.lock`
+  `claude-sl-usage-<hash>.json` and its matching `.lock`
 - Makes an HTTPS request to `https://api.anthropic.com/api/oauth/usage`
 
 It does not install dependencies, ship analytics, or send repository contents, prompts, or local files to any service other than Anthropic's usage endpoint.
