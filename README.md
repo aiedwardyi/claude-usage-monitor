@@ -101,7 +101,7 @@ At runtime, the tool:
 - reads Claude Code session JSON from `stdin`
 - reads `~/.claude/.credentials.json` for `claudeAiOauth.accessToken` (unless `CLAUDE_CODE_OAUTH_TOKEN` is set)
 - runs `git rev-parse --abbrev-ref HEAD` for the branch name
-- writes `claude-sl-usage.json` and `claude-sl-usage.lock` in your system temp directory
+- writes a per-login `claude-sl-usage-<hash>.json` cache and matching `.lock` in your system temp directory
 - makes one HTTPS request to `https://api.anthropic.com/api/oauth/usage`
 
 It does **not** install dependencies, collect telemetry, or send any local data besides the usage API call.
@@ -166,7 +166,7 @@ Every segment is toggleable via environment variables. Set them in your shell pr
 | `CQB_EMAIL` | `0` | Show the logged-in account email (Anthropic OAuth logins only; blank for API-key logins) |
 | `CQB_MAX_WIDTH` | `80` | Max status line width; low-priority segments (tokens, duration) drop when line overflows |
 
-Quota credentials are read from `CLAUDE_CONFIG_DIR` when set (as used by account-swap tools), falling back to `~/.claude`.
+Credentials, account email, and the usage cache all follow `CLAUDE_CONFIG_DIR` when set (as used by account-swap tools), falling back to `~/.claude`.
 
 ### Presets
 
