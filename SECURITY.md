@@ -9,7 +9,7 @@ The latest tagged release and the current `main` branch are supported.
 At runtime, `claude-usage-monitor` does the following:
 
 - Reads session JSON from Claude Code on `stdin`
-- Reads `~/.claude/.credentials.json` only to access `claudeAiOauth.accessToken`, unless `CLAUDE_CODE_OAUTH_TOKEN` is already set
+- Reads `~/.claude/.credentials.json` (or `$CLAUDE_CONFIG_DIR/.credentials.json` when set) only to access `claudeAiOauth.accessToken`, unless `CLAUDE_CODE_OAUTH_TOKEN` is already set
 - Runs `git rev-parse --abbrev-ref HEAD` in the current project to show the active branch
 - Writes a cache file and lock file in your system temp directory:
   `claude-sl-usage-<hash>.json` and its matching `.lock`
