@@ -9,6 +9,7 @@ Designed for Claude Code on Windows, macOS, and Linux. Caches API responses to
 the system temp directory for 5 minutes.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -29,6 +30,12 @@ if sys.stdout.encoding != "utf-8":
 def _config_home() -> Path:
     env = os.environ.get("CLAUDE_CONFIG_DIR")
     return Path(env) if env else Path.home() / ".claude"
+
+# Main config file (holds oauthAccount). Lives inside CLAUDE_CONFIG_DIR when set,
+# else the legacy ~/.claude.json sibling. Mirrors claude-code's own lookup.
+def _config_file() -> Path:
+    env = os.environ.get("CLAUDE_CONFIG_DIR")
+    return Path(env) / ".claude.json" if env else Path.home() / ".claude.json"
 
 # ── Configuration (env vars) ─────────────────────────────────────
 # Set these in your shell profile or in Claude Code's settings.json env block.
@@ -131,7 +138,7 @@ except (KeyError, TypeError):
 email = ""
 if SHOW_EMAIL:
     try:
-        cfg = json.loads((Path.home() / ".claude.json").read_text(encoding="utf-8"))
+        cfg = json.loads(_config_file().read_text(encoding="utf-8"))
         email = cfg.get("oauthAccount", {}).get("emailAddress", "") or ""
     except Exception:
         pass
@@ -233,9 +240,14 @@ def pace_indicator(used_pct, remain_min, window_min):
 
 
 # ── Quota API ───────────────────────────────────────────────────
+# Cache is keyed per config home so swapping logins (CLAUDE_CONFIG_DIR) never
+# serves another account's cached usage. Explicit CQB_CACHE_PATH still wins.
+_cache_key = hashlib.sha1(
+    str(_config_home()).encode(), usedforsecurity=False
+).hexdigest()[:12]
 CACHE_FILE = os.environ.get(
     "CQB_CACHE_PATH",
-    os.path.join(tempfile.gettempdir(), "claude-sl-usage.json"),
+    os.path.join(tempfile.gettempdir(), f"claude-sl-usage-{_cache_key}.json"),
 )
 CACHE_TTL = 300  # 5 minutes
 LOCK_FILE = CACHE_FILE + ".lock"
