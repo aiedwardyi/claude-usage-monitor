@@ -242,7 +242,9 @@ def pace_indicator(used_pct, remain_min, window_min):
 # ── Quota API ───────────────────────────────────────────────────
 # Cache is keyed per config home so swapping logins (CLAUDE_CONFIG_DIR) never
 # serves another account's cached usage. Explicit CQB_CACHE_PATH still wins.
-_cache_key = hashlib.sha1(str(_config_home()).encode()).hexdigest()[:12]
+_cache_key = hashlib.sha1(
+    str(_config_home()).encode(), usedforsecurity=False
+).hexdigest()[:12]
 CACHE_FILE = os.environ.get(
     "CQB_CACHE_PATH",
     os.path.join(tempfile.gettempdir(), f"claude-sl-usage-{_cache_key}.json"),
