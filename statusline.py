@@ -259,12 +259,27 @@ def get_oauth_token():
     tok = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
     if tok:
         return tok
-    # Credentials file
+    # Credentials file (Linux/Windows and older macOS installs)
     cred_path = _config_home() / ".credentials.json"
     if cred_path.exists():
         try:
             creds = json.loads(cred_path.read_text(encoding="utf-8"))
-            return creds.get("claudeAiOauth", {}).get("accessToken")
+            tok = creds.get("claudeAiOauth", {}).get("accessToken")
+            if tok:
+                return tok
+        except Exception:
+            pass
+    # macOS Keychain: Claude Code stores credentials here, not in .credentials.json
+    if sys.platform == "darwin":
+        try:
+            result = subprocess.run(
+                ["security", "find-generic-password",
+                 "-s", "Claude Code-credentials", "-w"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                creds = json.loads(result.stdout.strip())
+                return creds.get("claudeAiOauth", {}).get("accessToken")
         except Exception:
             pass
     return None
