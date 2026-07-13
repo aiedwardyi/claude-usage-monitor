@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.2.0
+
+### Added
+- `CQB_EMAIL` segment showing the logged-in account email (#19)
+
+### Fixed
+- Context gauge now honors `CQB_REMAINING`, so it flips with the 5h and 7d gauges instead of always counting down (#18)
+- Credentials, email, and usage cache now come from the `CLAUDE_CONFIG_DIR` login instead of only the default config path (#20, #22)
+- Read the OAuth token from the macOS login Keychain when it is missing from the credentials file, so the statusline works on a stock macOS install (#24)
+
 ## v0.1.6
 
 ### Fixed
