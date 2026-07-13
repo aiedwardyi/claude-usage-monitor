@@ -23,13 +23,13 @@
 ### Windows PowerShell
 
 ```powershell
-irm https://raw.githubusercontent.com/aiedwardyi/claude-usage-monitor/v0.1.6/install.ps1 | iex
+irm https://raw.githubusercontent.com/aiedwardyi/claude-usage-monitor/v0.2.0/install.ps1 | iex
 ```
 
 ### macOS / Linux
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/aiedwardyi/claude-usage-monitor/v0.1.6/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/aiedwardyi/claude-usage-monitor/v0.2.0/install.sh | bash
 ```
 
 ### What you get
@@ -53,7 +53,7 @@ Uses your existing Claude Code OAuth session. No extra API key or Python package
 ```bash
 git clone https://github.com/aiedwardyi/claude-usage-monitor.git
 cd claude-usage-monitor
-git switch --detach v0.1.6
+git switch --detach v0.2.0
 python install.py
 ```
 
@@ -199,7 +199,7 @@ Credentials, account email, and the usage cache all follow `CLAUDE_CONFIG_DIR` w
 ```bash
 git clone https://github.com/aiedwardyi/claude-usage-monitor.git
 cd claude-usage-monitor
-git switch --detach v0.1.6
+git switch --detach v0.2.0
 python install.py
 ```
 
