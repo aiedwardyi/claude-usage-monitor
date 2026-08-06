@@ -100,6 +100,92 @@ def smoke_statusline_py():
     assert_contains(proc.stdout, "75%", "statusline.py")
 
 
+def smoke_max_width_invalid():
+    import time
+
+    # A non-numeric, empty, or non-positive CQB_MAX_WIDTH must fall back to the
+    # default width of 80 and still render, not crash (ValueError) or blank the
+    # line (a width <= 0 drops every segment in the overflow loop). "foo"/""
+    # exercise the except branch; "0" and "-5" exercise the non-positive clamp --
+    # a distinct path because int("0") and int("-5") succeed without raising.
+    #
+    # Asserting only that the output renders would not pin the fallback: it would
+    # pass for any width at or above the natural line length. So the oracle is
+    # differential -- the payload and env below make line 2 overflow 80 columns,
+    # so width 80 drops the token and cost segments while width 200 keeps them.
+    # Each invalid value must then match the explicit-80 run byte for byte AND
+    # differ from the explicit-200 run.
+    payload = {
+        "model": {"display_name": "Opus"},
+        "context_window": {
+            "used_percentage": 25,
+            "context_window_size": 200000,
+            "total_input_tokens": 1234567,
+            "total_output_tokens": 987654,
+        },
+        "cost": {"total_cost_usd": 123.45, "total_duration_ms": 300000},
+        "workspace": {"project_dir": str(ROOT)},
+    }
+    stdin = json.dumps(payload)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        cache_file = os.path.join(tmp, "max-width-cache.json")
+        pathlib.Path(cache_file).write_text(
+            json.dumps({
+                "five_hour_used": 85,
+                "seven_day_used": 40,
+                "five_hour_reset_min": 120,
+                "seven_day_reset_min": 4320,
+                "fetched_at": time.time(),
+            }),
+            encoding="utf-8",
+        )
+        # Every optional segment on, so line 2 is long enough for the width to matter.
+        wide_env = {
+            "CQB_CACHE_PATH": cache_file,
+            "CQB_TOKENS": "1",
+            "CQB_RESET": "1",
+            "CQB_DURATION": "1",
+            "CQB_CONTEXT_SIZE": "1",
+            "CQB_COST": "1",
+            "CQB_PACE": "1",
+        }
+
+        def render(width):
+            proc = run(
+                [sys.executable, str(STATUSLINE_PY)],
+                stdin,
+                extra_env={**wide_env, "CQB_MAX_WIDTH": width},
+            )
+            assert_ok(proc, f"statusline.py CQB_MAX_WIDTH={width!r}")
+            return proc.stdout
+
+        at_80 = render("80")
+        at_200 = render("200")
+        # Guard the oracle itself: if these ever stop differing, the comparisons
+        # below become vacuous and would silently stop testing anything.
+        if at_80 == at_200:
+            raise AssertionError(
+                "max-width oracle is vacuous: width 80 and width 200 render "
+                f"identically, so the fallback cannot be pinned\noutput:\n{at_80}"
+            )
+
+        for bad in ("foo", "", "0", "-5"):
+            out = render(bad)
+            label = f"statusline.py CQB_MAX_WIDTH={bad!r}"
+            assert_contains(out, "Opus", label)
+            assert_contains(out, "75%", label)
+            if out != at_80:
+                raise AssertionError(
+                    f"{label} did not fall back to width 80\n"
+                    f"got:\n{out}\nexpected (CQB_MAX_WIDTH=80):\n{at_80}"
+                )
+            if out == at_200:
+                raise AssertionError(
+                    f"{label} fell back to an unbounded width, not 80\noutput:\n{out}"
+                )
+
+
 def smoke_empty_stdin():
     proc = run([sys.executable, str(STATUSLINE_PY)], "")
     assert_ok(proc, "statusline.py empty stdin")
@@ -737,6 +823,7 @@ def smoke_overflow():
 
 def main():
     smoke_statusline_py()
+    smoke_max_width_invalid()
     smoke_empty_stdin()
     smoke_unix_launcher()
     smoke_windows_launcher()
