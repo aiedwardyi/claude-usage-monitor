@@ -206,8 +206,9 @@ def used_pct_str(used_pct):
     used = int(used_pct)
     c = color_pct(used)
     val = 100 - used if SHOW_REMAINING else used
+    val = max(0, min(100, val))  # clamp so the displayed number matches the bar fill
     if SHOW_BAR:
-        filled = round(min(100, max(0, val)) / 100.0 * 5)
+        filled = round(val / 100.0 * 5)
         filled_chars = "\u25b0" * filled
         empty_chars = "\u25b1" * (5 - filled)
         bar = f"{c}{filled_chars}{empty_chars}{N} "
