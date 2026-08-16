@@ -50,7 +50,12 @@ SHOW_COST = os.environ.get("CQB_COST", "0") == "1"
 SHOW_REMAINING = os.environ.get("CQB_REMAINING", "1") == "1"
 SHOW_BAR = os.environ.get("CQB_BAR", "1") == "1"
 SHOW_EMAIL = os.environ.get("CQB_EMAIL", "0") == "1"
-MAX_WIDTH = int(os.environ.get("CQB_MAX_WIDTH", "80"))
+# Defensive: empty/non-numeric/non-positive CQB_MAX_WIDTH -> 80 (never blank the statusline).
+try:
+    MAX_WIDTH = int(os.environ.get("CQB_MAX_WIDTH", "80"))
+    MAX_WIDTH = MAX_WIDTH if MAX_WIDTH > 0 else 80
+except (TypeError, ValueError):
+    MAX_WIDTH = 80
 
 # ── Read stdin ──────────────────────────────────────────────────
 raw = sys.stdin.read().strip()
