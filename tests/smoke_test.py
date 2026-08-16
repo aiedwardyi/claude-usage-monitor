@@ -821,6 +821,70 @@ def smoke_overflow():
         assert_contains(clean, "5m", "no overflow (duration present)")
 
 
+def smoke_clamp_percent():
+    # Out-of-range utilization (an API spike or a stale/hand-edited cache) must
+    # not make the bar fill and the displayed number disagree. The bar fill is
+    # clamped to [0,100]; the number must be too. In default remaining mode,
+    # five_hour_used=150 -> remaining -50% (empty bar) and seven_day_used=-5 ->
+    # remaining 105% (full bar) would otherwise leak past the bar's range.
+    import re
+    import time as _time
+
+    payload = {
+        "model": {"display_name": "Opus"},
+        "context_window": {
+            "used_percentage": 25,
+            "context_window_size": 200000,
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+        },
+        "cost": {"total_cost_usd": 0, "total_duration_ms": 0},
+        "workspace": {"project_dir": str(ROOT)},
+    }
+    stdin = json.dumps(payload)
+    ansi_re = re.compile(r"\033\[[0-9;]*m")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        cache_file = os.path.join(tmp, "test-cache.json")
+        cache_data = json.dumps({
+            "five_hour_used": 150,
+            "seven_day_used": -5,
+            "five_hour_reset_min": 120,
+            "seven_day_reset_min": 4320,
+            "extra_enabled": False,
+            "extra_used": 0,
+            "extra_limit": 0,
+            "fetched_at": _time.time(),
+        })
+        pathlib.Path(cache_file).write_text(cache_data, encoding="utf-8")
+        cache_env = {"CQB_CACHE_PATH": cache_file}
+
+        # Default remaining mode: 5h would read -50%, 7d would read 105% unclamped.
+        proc = run(
+            [sys.executable, str(STATUSLINE_PY)],
+            stdin,
+            extra_env={**cache_env, "CQB_REMAINING": "1"},
+        )
+        assert_ok(proc, "clamp percent")
+        # Line 2 is "context │ 5h │ 7d" (run() disables tokens/reset/duration/branch).
+        line2 = proc.stdout.splitlines()[1]
+        ctx, h5, d7 = line2.split("│")
+        h5_clean = ansi_re.sub("", h5)
+        d7_clean = ansi_re.sub("", d7)
+        # The raw -50% / 105% must never render; both clamp inside [0,100]...
+        if "-50%" in h5_clean:
+            raise AssertionError(
+                f"5h must clamp out-of-range remaining, not show -50%\nsegment:\n{h5_clean}"
+            )
+        if "105%" in d7_clean:
+            raise AssertionError(
+                f"7d must clamp out-of-range remaining, not show 105%\nsegment:\n{d7_clean}"
+            )
+        # ...and land on the clamped value the bar already shows.
+        assert_contains(h5_clean, "0%", "clamp percent (5h clamps to 0)")
+        assert_contains(d7_clean, "100%", "clamp percent (7d clamps to 100)")
+
+
 def main():
     smoke_statusline_py()
     smoke_max_width_invalid()
@@ -836,6 +900,7 @@ def main():
     smoke_bar_toggle()
     smoke_remaining_toggle()
     smoke_overflow()
+    smoke_clamp_percent()
     print("smoke tests passed")
 
 
