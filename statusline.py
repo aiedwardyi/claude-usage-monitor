@@ -203,6 +203,17 @@ def format_reset(minutes):
     return f" {D}({m}m){N}"
 
 
+def gauge_blocks(val):
+    """Filled blocks (0-5) for a 0-100 percent gauge.
+
+    Keeps round()'s banker's rounding for the exact .5 ties (10/30/50/70/90
+    may land on either neighbour) and adds a single floor: from 10% upward
+    the bar never renders fully depleted. round(0.5) -> 0 used to show an
+    empty bar at 10% remaining, which reads as "nothing left".
+    """
+    v = min(100, max(0, val))
+    return max(1, round(v / 20.0)) if v >= 10 else 0
+
 
 def used_pct_str(used_pct):
     """Format used or remaining % with color."""
@@ -213,7 +224,7 @@ def used_pct_str(used_pct):
     val = 100 - used if SHOW_REMAINING else used
     val = max(0, min(100, val))  # clamp so the displayed number matches the bar fill
     if SHOW_BAR:
-        filled = round(val / 100.0 * 5)
+        filled = gauge_blocks(val)
         filled_chars = "\u25b0" * filled
         empty_chars = "\u25b1" * (5 - filled)
         bar = f"{c}{filled_chars}{empty_chars}{N} "
@@ -426,7 +437,7 @@ DIAMOND = "\u25c6"  # ◆
 # Context gauge (5 blocks)
 ctx_remaining = 100 - ctx_pct_used
 ctx_val = ctx_remaining if SHOW_REMAINING else ctx_pct_used
-filled = round(min(100, max(0, ctx_val)) / 100.0 * 5)
+filled = gauge_blocks(ctx_val)
 gauge = "\u25b0" * filled + "\u25b1" * (5 - filled)  # ▰▱
 
 # Context size label

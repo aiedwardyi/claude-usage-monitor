@@ -885,6 +885,112 @@ def smoke_clamp_percent():
         assert_contains(d7_clean, "100%", "clamp percent (7d clamps to 100)")
 
 
+def test_context_gauge_floor_from_ten_percent():
+    # statusline.py's context gauge maps a 0-100 % value to 5 blocks. It used
+    # Python round() (banker's rounding): round(0.5) -> 0 made 10% remaining
+    # render as a fully-depleted bar - "nothing left" with a tenth still
+    # there. Per review, banker's rounding itself stays (the .5 ties at
+    # 30/50/70/90 may land on either neighbour); the single rule added is a
+    # floor: from 10% upward the bar never renders fully depleted.
+    #
+    # CQB_BAR=0 disables the 5h/7d bars, leaving the context gauge as the ONLY
+    # source of ▰/▱ in the output, so the filled-block count isolates the
+    # context gauge (statusline.py module-level `gauge`) exactly.
+    import re
+    ansi_re = re.compile(r"\033\[[0-9;]*m")
+
+    def ctx_filled(used_percentage):
+        payload = {
+            "model": {"display_name": "Opus"},
+            "context_window": {
+                "used_percentage": used_percentage,
+                "context_window_size": 200000,
+                "total_input_tokens": 0,
+                "total_output_tokens": 0,
+            },
+            "cost": {"total_cost_usd": 0, "total_duration_ms": 0},
+            "workspace": {"project_dir": str(ROOT)},
+        }
+        proc = run(
+            [sys.executable, str(STATUSLINE_PY)],
+            json.dumps(payload),
+            extra_env={"CQB_BAR": "0"},
+        )
+        assert_ok(proc, f"context gauge used_percentage={used_percentage}")
+        return ansi_re.sub("", proc.stdout).count("▰")
+
+    # Default remaining-mode gauge: banker's rounding kept, floor from 10%.
+    # (remaining % -> filled blocks)
+    expected = {
+        0: 0, 10: 1, 20: 1, 30: 2, 40: 2, 50: 2,
+        60: 3, 70: 4, 80: 4, 90: 4, 100: 5,
+    }
+    for remaining, blocks in expected.items():
+        got = ctx_filled(100 - remaining)
+        if got != blocks:
+            raise AssertionError(
+                f"context gauge remaining={remaining}%: expected {blocks} "
+                f"filled block(s), got {got}"
+            )
+
+
+def test_quota_bar_floor_from_ten_percent():
+    # The 5h/7d bars (statusline.py used_pct_str) share the gauge_blocks
+    # helper with the context gauge, so they get the same floor rule.
+    # Isolate the 5h bar by holding the context gauge and the 7d bar at a
+    # stable fill: used=20 -> remaining 80 -> 4 blocks (4.0 has no .5 tie).
+    # Vary only five_hour_used; the change in total filled blocks is the 5h bar.
+    import re
+    import time as _time
+    ansi_re = re.compile(r"\033\[[0-9;]*m")
+
+    def total_filled(five_hour_used):
+        payload = {
+            "model": {"display_name": "Opus"},
+            "context_window": {
+                "used_percentage": 20,  # remaining 80 -> stable 4 blocks
+                "context_window_size": 200000,
+                "total_input_tokens": 0,
+                "total_output_tokens": 0,
+            },
+            "cost": {"total_cost_usd": 0, "total_duration_ms": 0},
+            "workspace": {"project_dir": str(ROOT)},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_file = os.path.join(tmp, "test-cache.json")
+            pathlib.Path(cache_file).write_text(json.dumps({
+                "five_hour_used": five_hour_used,
+                "seven_day_used": 20,  # remaining 80 -> stable 4 blocks
+                "five_hour_reset_min": 120,
+                "seven_day_reset_min": 4320,
+                "extra_enabled": False,
+                "extra_used": 0,
+                "extra_limit": 0,
+                "fetched_at": _time.time(),
+            }), encoding="utf-8")
+            # SHOW_BAR defaults ON; cache supplies 5h/7d without a token.
+            proc = run(
+                [sys.executable, str(STATUSLINE_PY)],
+                json.dumps(payload),
+                extra_env={"CQB_CACHE_PATH": cache_file},
+            )
+            assert_ok(proc, f"quota bar five_hour_used={five_hour_used}")
+            return ansi_re.sub("", proc.stdout).count("▰")
+
+    # remaining = 100 - five_hour_used. Banker's rounding keeps the exact .5
+    # ties (30% and 50% both land on 2 blocks; 70% and 90% both on 4), which
+    # review accepted; the load-bearing part is the floor: at 10% remaining
+    # the 5h bar shows 1 block, not 0. Baseline: context 4 + 7d 4 = 8 blocks.
+    expected_five_hour = {10: 1, 30: 2, 50: 2, 70: 4, 90: 4}
+    for remaining, blocks in expected_five_hour.items():
+        got = total_filled(100 - remaining) - 8
+        if got != blocks:
+            raise AssertionError(
+                f"5h bar at {remaining}% remaining: expected {blocks} filled "
+                f"block(s), got {got}"
+            )
+
+
 def main():
     smoke_statusline_py()
     smoke_max_width_invalid()
@@ -901,6 +1007,8 @@ def main():
     smoke_remaining_toggle()
     smoke_overflow()
     smoke_clamp_percent()
+    test_context_gauge_floor_from_ten_percent()
+    test_quota_bar_floor_from_ten_percent()
     print("smoke tests passed")
 
 
