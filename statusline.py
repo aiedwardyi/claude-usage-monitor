@@ -200,21 +200,22 @@ def format_duration(ms):
     return f"{ms // 1000}s"
 
 
-def format_reset(minutes):
+def format_reset(minutes, compact=False):
     """Format reset countdown.
 
     Carries a second unit so "(1d)" cannot silently mean 47h, and drops that
-    unit when it is zero so exact boundaries stay "(2h)" / "(2d)".
+    unit when it is zero so exact boundaries stay "(2h)" / "(2d)". compact
+    keeps only the largest unit, for when the line has to give something back.
     """
     if minutes is None:
         return ""
     m = int(minutes)
     if m >= 1440:
         d, h = m // 1440, (m % 1440) // 60
-        return f" {D}({d}d{h}h){N}" if h else f" {D}({d}d){N}"
+        return f" {D}({d}d{h}h){N}" if h and not compact else f" {D}({d}d){N}"
     if m >= 60:
         h, mm = m // 60, m % 60
-        return f" {D}({h}h{mm}m){N}" if mm else f" {D}({h}h){N}"
+        return f" {D}({h}h{mm}m){N}" if mm and not compact else f" {D}({h}h){N}"
     return f" {D}({m}m){N}"
 
 
@@ -491,6 +492,8 @@ if SHOW_TOKENS and (in_tok or out_tok):
     line2_segments.append((f"\u2191{compact(in_tok)} \u2193{compact(out_tok)}", 4))
 
 # Quota
+quota_at = ()
+quota_fallbacks = []
 usage = read_cached_usage()
 if usage:
     u5 = usage["u5"]
@@ -500,11 +503,20 @@ if usage:
 
     pace5 = pace_indicator(u5, r5, 300) if SHOW_PACE else ""
     pace7 = pace_indicator(u7, r7, 10080) if SHOW_PACE else ""
+    quota5 = f"5h: {used_pct_str(u5)}{pace5}"
+    quota7 = f"7d: {used_pct_str(u7)}{pace7}"
     reset5 = format_reset(r5) if SHOW_RESET else ""
     reset7 = format_reset(r7) if SHOW_RESET else ""
 
-    line2_segments.append((f"5h: {used_pct_str(u5)}{pace5}{reset5}", 1))
-    line2_segments.append((f"7d: {used_pct_str(u7)}{pace7}{reset7}", 1))
+    quota_at = (len(line2_segments), len(line2_segments) + 1)
+    line2_segments.append((quota5 + reset5, 1))
+    line2_segments.append((quota7 + reset7, 1))
+    if SHOW_RESET:
+        quota_fallbacks = [
+            (quota5 + format_reset(r5, compact=True),
+             quota7 + format_reset(r7, compact=True)),
+            (quota5, quota7),
+        ]
 else:
     if not get_oauth_token():
         line2_segments.append((f"5h: {D}no token{N}", 1))
@@ -526,6 +538,17 @@ def build_line(segments):
     return SEP.join(text for text, _ in segments)
 
 line2 = build_line(line2_segments)
+
+# Give back countdown detail before sacrificing a whole segment: the gauge is
+# the number you act on, and dropping one costs far more than the "(1d16h)" it
+# was protecting. Second unit first, then the countdown entirely.
+for narrower in quota_fallbacks:
+    if len(strip_ansi(line2)) <= MAX_WIDTH:
+        break
+    for index, text in zip(quota_at, narrower):
+        line2_segments[index] = (text, line2_segments[index][1])
+    line2 = build_line(line2_segments)
+
 while len(strip_ansi(line2)) > MAX_WIDTH and line2_segments:
     worst = max(range(len(line2_segments)), key=lambda i: line2_segments[i][1])
     line2_segments.pop(worst)
