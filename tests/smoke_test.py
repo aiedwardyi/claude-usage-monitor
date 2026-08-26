@@ -17,28 +17,23 @@ STATUSLINE_SH = ROOT / "statusline.sh"
 STATUSLINE_CMD = ROOT / "statusline.cmd"
 
 
-def _bash_launcher_expected() -> bool:
-    # Mirror install.py's _use_bash_launcher so end-to-end installer tests
-    # expect whichever launcher form install.py will actually write for the
-    # current host. On posix this is always True; on Windows it requires a
-    # bash on PATH whose `bash -c "exit 0"` probe succeeds (so the WSL stub
-    # without a Linux distro installed is correctly classified as unusable).
-    # When False on Windows, the installer falls back to a direct
-    # `python.exe statusline.py` command (not `.cmd`) because Claude Code's
-    # statusLine spawn can't execute `.cmd` files.
-    if os.name != "nt":
-        return True
-    if not shutil.which("bash"):
-        return False
-    try:
-        result = subprocess.run(
-            ["bash", "-c", "exit 0"],
-            capture_output=True,
-            timeout=5,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return result.returncode == 0
+def _load_install():
+    # Reuse install.py's own path normalisation so the mirrored probe below
+    # cannot drift from the real gate.
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_install_under_test", INSTALL_PY)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _bash_launcher_expected(install_dir) -> bool:
+    # Ask install.py itself which launcher form it will write for this host, so
+    # the end-to-end assertions cannot drift from the real gate. Whether that
+    # gate is correct is pinned separately, by
+    # test_bash_probe_consults_the_installed_script.
+    return _load_install()._use_bash_launcher(pathlib.Path(install_dir))
 
 
 def run(command, stdin_text="", extra_env=None):
@@ -263,7 +258,7 @@ def smoke_installer():
         # a direct `python.exe statusline.py` command otherwise. Use the
         # same helper install.py uses so CI runners where `bash` on PATH is
         # a broken WSL stub expect the python fallback.
-        expected_fragment = "statusline.sh" if _bash_launcher_expected() else "statusline.py"
+        expected_fragment = "statusline.sh" if _bash_launcher_expected(install_dir) else "statusline.py"
         if expected_fragment not in command:
             raise AssertionError(f"unexpected installed command: {command}")
         if os.name == "nt" and "\\" in command:
@@ -338,7 +333,7 @@ def smoke_windows_install_wrapper():
 
         settings = json.loads(settings_path.read_text(encoding="utf-8"))
         command = settings.get("statusLine", {}).get("command", "")
-        expected_fragment = "statusline.sh" if _bash_launcher_expected() else "statusline.py"
+        expected_fragment = "statusline.sh" if _bash_launcher_expected(install_dir) else "statusline.py"
         if expected_fragment not in command:
             raise AssertionError(f"unexpected install.ps1 command: {command}")
 
@@ -1052,6 +1047,68 @@ def test_reset_countdown_shows_two_units():
             assert_contains(ansi_re.sub("", d7), want7, f"7d reset {min7}m -> {want7}")
 
 
+def test_bash_probe_consults_the_installed_script():
+    # The Windows gate used to probe `bash -c "exit 0"`, which only rejects the
+    # distro-less WSL stub. With a distro installed WSL runs `exit 0` fine but
+    # still cannot resolve a C:/... path, so the gate passed and the emitted
+    # `bash "C:/..."` command failed with "No such file or directory". The
+    # probe now asks whether the installed script is readable, so a bash that
+    # cannot see the install dir is rejected no matter why.
+    install = _load_install()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = pathlib.Path(tmp)
+        target = tmp_path / "install-target"
+        target.mkdir()
+
+        if os.name != "nt":
+            if install._use_bash_launcher(target) is not True:
+                raise AssertionError("posix must always use the bash launcher")
+            return
+
+        # Whether the bash that will run the command can read a Windows path at
+        # all, measured on an unrelated file so it is not the gate's own answer
+        # fed back in. Git Bash can; WSL cannot, and that is the split this PR
+        # exists for, so the expected verdict below follows from it.
+        canary = tmp_path / "canary.txt"
+        canary.write_text("x", encoding="utf-8")
+        try:
+            bash_reads_windows_paths = subprocess.run(
+                ["bash", "-c", install.PROBE_SCRIPT],
+                input=(str(canary).replace(os.sep, "/") + "\n").encode(),
+                capture_output=True,
+                timeout=5,
+            ).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            bash_reads_windows_paths = False
+
+        # No statusline.sh yet: unreadable for every bash, so always declined.
+        if install._use_bash_launcher(target) is not False:
+            raise AssertionError(
+                "bash gate must reject an install dir with no statusline.sh"
+            )
+
+        # Script present: accepted exactly when that bash can actually read it.
+        # The old exit-0 probe answered True here even on WSL, which is the bug.
+        shutil.copy2(STATUSLINE_SH, target / "statusline.sh")
+        if install._use_bash_launcher(target) is not bash_reads_windows_paths:
+            raise AssertionError(
+                f"bash gate must track whether bash can read the script "
+                f"(bash reads Windows paths: {bash_reads_windows_paths})"
+            )
+
+        # A directory name carrying bash metacharacters must be tested
+        # literally. The verdict tracks readability like any other path; what
+        # must never happen is the path being expanded or executed.
+        tricky = tmp_path / "$(touch pwned)`x`"
+        tricky.mkdir()
+        shutil.copy2(STATUSLINE_SH, tricky / "statusline.sh")
+        if install._use_bash_launcher(tricky) is not bash_reads_windows_paths:
+            raise AssertionError(f"metacharacters in {tricky} changed the verdict")
+        if (tmp_path / "pwned").exists() or (tricky / "pwned").exists():
+            raise AssertionError("probe executed a command substitution from the path")
+
+
 def main():
     smoke_statusline_py()
     smoke_max_width_invalid()
@@ -1064,6 +1121,7 @@ def main():
     smoke_windows_install_pipe()
     smoke_build_status_command()
     smoke_windows_python_command_unsafe_path_guard()
+    test_bash_probe_consults_the_installed_script()
     smoke_bar_toggle()
     smoke_remaining_toggle()
     smoke_overflow()
