@@ -44,10 +44,11 @@ def _bash_launcher_expected(install_dir) -> bool:
         return True
     if not shutil.which("bash"):
         return False
-    sh_path = _load_install()._bash_script_arg(pathlib.Path(install_dir))
+    install = _load_install()
+    sh_path = install._bash_script_arg(pathlib.Path(install_dir))
     try:
         result = subprocess.run(
-            ["bash", "-c", _load_install().PROBE_SCRIPT],
+            ["bash", "-c", install.PROBE_SCRIPT],
             input=(sh_path + "\n").encode(),
             capture_output=True,
             timeout=5,
@@ -1066,6 +1067,8 @@ def test_reset_countdown_shows_two_units():
             ctx, h5, d7 = proc.stdout.splitlines()[1].split("│")
             assert_contains(ansi_re.sub("", h5), want5, f"5h reset {min5}m -> {want5}")
             assert_contains(ansi_re.sub("", d7), want7, f"7d reset {min7}m -> {want7}")
+
+
 def test_bash_probe_consults_the_installed_script():
     # The Windows gate used to probe `bash -c "exit 0"`, which only rejects the
     # distro-less WSL stub. With a distro installed WSL runs `exit 0` fine but
@@ -1093,7 +1096,8 @@ def test_bash_probe_consults_the_installed_script():
         canary.write_text("x", encoding="utf-8")
         try:
             bash_reads_windows_paths = subprocess.run(
-                ["bash", "-c", 'test -r "$1"', "bash", str(canary).replace(os.sep, "/")],
+                ["bash", "-c", install.PROBE_SCRIPT],
+                input=(str(canary).replace(os.sep, "/") + "\n").encode(),
                 capture_output=True,
                 timeout=5,
             ).returncode == 0

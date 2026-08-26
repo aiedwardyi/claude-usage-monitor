@@ -96,7 +96,7 @@ def _use_bash_launcher(install_dir: Path) -> bool:
     System32 first. A Git Bash on PATH therefore masks the WSL bash at
     `C:\\Windows\\System32\\bash.exe` that actually runs the command.
 
-    Probing `test -f` rather than `exit 0` is what makes that safe. WSL runs
+    Probing `test -r` rather than `exit 0` is what makes that safe. WSL runs
     `exit 0` fine once a distro is installed, but cannot resolve a `C:/...`
     path (it needs `/mnt/c/...`), so the old probe passed and the emitted
     command then failed with "No such file or directory". Asking whether the
@@ -211,8 +211,8 @@ def _windows_python_command(install_dir: Path) -> str:
 
 
 def build_status_command(install_dir: Path) -> str:
-    # No posix fallback below: _use_bash_launcher() returns False only on
-    # Windows, so the trailing python-command return always handles that case.
+    # No posix fallback below: _use_bash_launcher(install_dir) returns False
+    # only on Windows, so the trailing python-command return covers that case.
     if _use_bash_launcher(install_dir):
         sh_arg = _bash_script_arg(install_dir)
         if os.name == "nt":
