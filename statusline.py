@@ -192,14 +192,20 @@ def format_duration(ms):
 
 
 def format_reset(minutes):
-    """Format reset countdown."""
+    """Format reset countdown.
+
+    Carries a second unit so "(1d)" cannot silently mean 47h, and drops that
+    unit when it is zero so exact boundaries stay "(2h)" / "(2d)".
+    """
     if minutes is None:
         return ""
     m = int(minutes)
     if m >= 1440:
-        return f" {D}({m // 1440}d){N}"
+        d, h = m // 1440, (m % 1440) // 60
+        return f" {D}({d}d{h}h){N}" if h else f" {D}({d}d){N}"
     if m >= 60:
-        return f" {D}({m // 60}h){N}"
+        h, mm = m // 60, m % 60
+        return f" {D}({h}h{mm}m){N}" if mm else f" {D}({h}h){N}"
     return f" {D}({m}m){N}"
 
 
