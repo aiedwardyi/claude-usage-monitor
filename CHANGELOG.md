@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- Reset countdowns now carry a second unit, so a 7d window resetting in 40h25m reads `(1d16h)` instead of `(1d)`. The single floored unit gave the 7-day window seven possible values across seven days and understated the countdown by up to 23h, which reads as far less quota time than is actually left. The finer unit is dropped when it is zero, so exact boundaries stay `(2h)` / `(2d)`, and countdowns under an hour are unchanged.
+
 ## v0.2.0
 
 ### Added

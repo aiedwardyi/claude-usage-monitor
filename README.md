@@ -80,8 +80,8 @@ If you want to verify the launcher yourself before restarting Claude Code:
 | `my-project/main` | Project name and git branch |
 | `▰▰▰▰▱ 75%` | Context window remaining |
 | `↑50k ↓12k` | Input and output tokens |
-| `5h: ▰▰▰▰▱ 80% (1h)` | 5-hour quota remaining with bar and reset countdown |
-| `7d: ▰▰▱▱▱ 34% (2d)` | 7-day quota remaining with bar and reset countdown |
+| `5h: ▰▰▰▰▱ 80% (1h55m)` | 5-hour quota remaining with bar and reset countdown |
+| `7d: ▰▰▱▱▱ 34% (2d5h)` | 7-day quota remaining with bar and reset countdown |
 | `2m0s` | Session duration |
 
 All three bars show remaining % by default - they start full (green) and drain toward empty (red) as you use quota, like a fuel gauge. Prefer the fill-up style Claude Code uses? Set `CQB_REMAINING=0`.
