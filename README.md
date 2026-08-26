@@ -164,7 +164,7 @@ Every segment is toggleable via environment variables. Set them in your shell pr
 | `CQB_REMAINING` | `1` | Show remaining % (fuel gauge) for all gauges; set `0` for used % |
 | `CQB_BAR` | `1` | Show visual progress bar next to 5h/7d quotas |
 | `CQB_EMAIL` | `0` | Show the logged-in account email (Anthropic OAuth logins only; blank for API-key logins) |
-| `CQB_MAX_WIDTH` | `80` | Max status line width; low-priority segments (tokens, duration) drop when line overflows |
+| `CQB_MAX_WIDTH` | terminal width | Max status line width; defaults to your terminal's, or 80 on Claude Code older than v2.1.153. Low-priority segments (tokens, duration) drop when the line overflows |
 
 Credentials, account email, and the usage cache all follow `CLAUDE_CONFIG_DIR` when set (as used by account-swap tools), falling back to `~/.claude`.
 
