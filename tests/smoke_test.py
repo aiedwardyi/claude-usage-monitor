@@ -1018,7 +1018,7 @@ def test_reset_countdown_shows_two_units():
     cases = [
         (115, 2425, "(1h55m)", "(1d16h)"),   # the reported case: 1h55m / 40h25m
         (120, 2880, "(2h)", "(2d)"),         # exact boundaries keep one unit
-        (45, 1499, "(45m)", "(1d)"),         # sub-hour unchanged; 1d0h59m -> (1d)
+        (45, 1499, "(45m)", "(1d)"),         # minutes branch unchanged; days branch still hides sub-hour (59m here)
         (299, 10079, "(4h59m)", "(6d23h)"),  # widest render each window allows
     ]
 
