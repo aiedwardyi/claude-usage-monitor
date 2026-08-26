@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.2.1
 
 ### Fixed
 - The status line now sizes itself to the terminal instead of a hardcoded 80 columns. Claude Code exports the real width as `COLUMNS` (v2.1.153+), which is the only source available since our stdout is captured rather than attached to the tty, so `tput cols` and `get_terminal_size()` both report a fallback. A 98-column terminal was losing 18 columns and dropping token counts that had room to render. `CQB_MAX_WIDTH` still wins when set, and 80 remains the fallback when `COLUMNS` is absent.
