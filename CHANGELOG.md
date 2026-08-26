@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Fixed
+- The status line now sizes itself to the terminal instead of a hardcoded 80 columns. Claude Code exports the real width as `COLUMNS` (v2.1.153+), which is the only source available since our stdout is captured rather than attached to the tty, so `tput cols` and `get_terminal_size()` both report a fallback. A 98-column terminal was losing 18 columns and dropping token counts that had room to render. `CQB_MAX_WIDTH` still wins when set, and 80 remains the fallback when `COLUMNS` is absent.
 - Reset countdowns now carry a second unit, so a 7d window resetting in 40h25m reads `(1d16h)` instead of `(1d)`. Flooring to a single unit gave the 7-day window seven possible values across seven days and understated the countdown by up to 23h, which reads as far less quota time than is actually left. The finer unit is dropped when it is zero, so exact boundaries stay `(2h)` / `(2d)`, and countdowns under an hour are unchanged.
 
 ## v0.2.0

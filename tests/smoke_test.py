@@ -1052,6 +1052,78 @@ def test_reset_countdown_shows_two_units():
             assert_contains(ansi_re.sub("", d7), want7, f"7d reset {min7}m -> {want7}")
 
 
+def test_width_follows_the_real_terminal():
+    # MAX_WIDTH was hardcoded to 80, so a 98-column terminal lost 18 columns
+    # and the overflow loop deleted priority-4 segments (tokens, cost) that
+    # would have fitted. Claude Code sets COLUMNS to the real terminal width
+    # before running the script (tput/get_terminal_size cannot see it, because
+    # our stdout is captured rather than attached to the tty), so read that.
+    # CQB_MAX_WIDTH still wins when set, and 80 remains the fallback for
+    # Claude Code older than v2.1.153, which does not set COLUMNS.
+    import re
+    import time as _time
+
+    payload = {
+        "model": {"display_name": "Opus"},
+        "context_window": {
+            "used_percentage": 18,
+            "context_window_size": 1000000,
+            "total_input_tokens": 217731,
+            "total_output_tokens": 12400,
+        },
+        "cost": {"total_cost_usd": 0, "total_duration_ms": 2148000},
+        "workspace": {"project_dir": str(ROOT)},
+    }
+    stdin = json.dumps(payload)
+    ansi_re = re.compile(r"\033\[[0-9;]*m")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        cache_file = os.path.join(tmp, "test-cache.json")
+        pathlib.Path(cache_file).write_text(json.dumps({
+            "five_hour_used": 16,
+            "seven_day_used": 44,
+            "five_hour_reset_min": 79,
+            "seven_day_reset_min": 2355,
+            "extra_enabled": False,
+            "extra_used": 0,
+            "extra_limit": 0,
+            "fetched_at": _time.time() + 30,
+        }), encoding="utf-8")
+
+        def line2(extra):
+            env = {"CQB_CACHE_PATH": cache_file, "CQB_RESET": "1",
+                   "CQB_TOKENS": "1", "CQB_DURATION": "1"}
+            env.update(extra)
+            proc = run([sys.executable, str(STATUSLINE_PY)], stdin, extra_env=env)
+            assert_ok(proc, "terminal width")
+            return ansi_re.sub("", proc.stdout.splitlines()[1])
+
+        # A 98-column terminal fits the whole line; nothing may be dropped.
+        wide = line2({"COLUMNS": "98"})
+        if "↑" not in wide:
+            raise AssertionError(
+                f"COLUMNS=98 has room for the token counts\nline2:\n{wide}")
+        if len(wide) > 98:
+            raise AssertionError(f"line2 must fit COLUMNS: {len(wide)}\n{wide}")
+
+        # A narrow terminal must still shed segments rather than overflow.
+        narrow = line2({"COLUMNS": "60"})
+        if len(narrow) > 60:
+            raise AssertionError(f"line2 must fit COLUMNS=60: {len(narrow)}\n{narrow}")
+
+        # CQB_MAX_WIDTH stays authoritative over COLUMNS.
+        pinned = line2({"COLUMNS": "200", "CQB_MAX_WIDTH": "60"})
+        if len(pinned) > 60:
+            raise AssertionError(
+                f"CQB_MAX_WIDTH must win over COLUMNS: {len(pinned)}\n{pinned}")
+
+        # No COLUMNS (Claude Code < 2.1.153) keeps the historical 80.
+        fallback = line2({"COLUMNS": ""})
+        if len(fallback) > 80:
+            raise AssertionError(
+                f"missing COLUMNS must fall back to 80: {len(fallback)}\n{fallback}")
+
+
 def main():
     smoke_statusline_py()
     smoke_max_width_invalid()
@@ -1071,6 +1143,7 @@ def main():
     test_context_gauge_floor_from_ten_percent()
     test_quota_bar_floor_from_ten_percent()
     test_reset_countdown_shows_two_units()
+    test_width_follows_the_real_terminal()
     print("smoke tests passed")
 
 
