@@ -49,6 +49,10 @@ def run(command, stdin_text="", extra_env=None):
     # specific settings via the explicit defaults below and extra_env.
     for key in [k for k in env if k.startswith("CQB_")]:
         del env[key]
+    # COLUMNS feeds MAX_WIDTH the same way CQB_MAX_WIDTH does, so a developer
+    # shell that exports it would otherwise re-render every default-mode
+    # assertion at the terminal's width. Tests that care pass it explicitly.
+    env.pop("COLUMNS", None)
     env["CQB_TOKENS"] = "0"
     env["CQB_RESET"] = "0"
     env["CQB_DURATION"] = "0"
@@ -1122,6 +1126,18 @@ def test_width_follows_the_real_terminal():
         if len(fallback) > 80:
             raise AssertionError(
                 f"missing COLUMNS must fall back to 80: {len(fallback)}\n{fallback}")
+
+        # An unusable CQB_MAX_WIDTH falls through to COLUMNS, not straight to 80.
+        for junk in ("foo", "", "0", "-5"):
+            fell_through = line2({"COLUMNS": "60", "CQB_MAX_WIDTH": junk})
+            if len(fell_through) > 60:
+                raise AssertionError(
+                    f"CQB_MAX_WIDTH={junk!r} must fall through to COLUMNS=60: "
+                    f"{len(fell_through)}\n{fell_through}")
+            if fell_through != narrow:
+                raise AssertionError(
+                    f"CQB_MAX_WIDTH={junk!r} must render as plain COLUMNS=60"
+                    f"\ngot:  {fell_through}\nwant: {narrow}")
 
 
 def main():
