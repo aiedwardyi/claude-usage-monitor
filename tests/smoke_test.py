@@ -1052,6 +1052,86 @@ def test_reset_countdown_shows_two_units():
             assert_contains(ansi_re.sub("", d7), want7, f"7d reset {min7}m -> {want7}")
 
 
+def test_countdown_sheds_before_a_quota_gauge():
+    # The overflow loop drops whole segments, so a narrow terminal paid an
+    # entire quota window to keep eight characters of countdown: at 40 columns
+    # only "7d: ... (1d16h)" survived and the 5h gauge was gone. The gauge is
+    # the number you act on; the countdown only matters once you are nearly
+    # empty, and the percentage still tells you that. So the countdown now
+    # sheds first, in two steps (second unit, then the whole thing), before
+    # any segment is dropped.
+    import re
+    import time as _time
+
+    payload = {
+        "model": {"display_name": "Opus"},
+        "context_window": {
+            "used_percentage": 18,
+            "context_window_size": 1000000,
+            "total_input_tokens": 217731,
+            "total_output_tokens": 12400,
+        },
+        "cost": {"total_cost_usd": 0, "total_duration_ms": 2148000},
+        "workspace": {"project_dir": str(ROOT)},
+    }
+    stdin = json.dumps(payload)
+    ansi_re = re.compile(r"\033\[[0-9;]*m")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        cache_file = os.path.join(tmp, "test-cache.json")
+        pathlib.Path(cache_file).write_text(json.dumps({
+            "five_hour_used": 16,
+            "seven_day_used": 44,
+            "five_hour_reset_min": 115,
+            "seven_day_reset_min": 2425,
+            "extra_enabled": False,
+            "extra_used": 0,
+            "extra_limit": 0,
+            "fetched_at": _time.time() + 30,
+        }), encoding="utf-8")
+
+        def line2(width):
+            proc = run(
+                [sys.executable, str(STATUSLINE_PY)],
+                stdin,
+                extra_env={
+                    "CQB_CACHE_PATH": cache_file,
+                    "CQB_MAX_WIDTH": str(width),
+                    "CQB_RESET": "1",
+                    "CQB_TOKENS": "1",
+                    "CQB_DURATION": "1",
+                },
+            )
+            assert_ok(proc, f"shed countdown at {width}")
+            out = ansi_re.sub("", proc.stdout.splitlines()[1])
+            if len(out) > width:
+                raise AssertionError(f"line2 must fit {width}: {len(out)}\n{out}")
+            return out
+
+        # Roomy: both countdowns render in full.
+        wide = line2(98)
+        assert_contains(wide, "(1h55m)", "wide keeps the full 5h countdown")
+        assert_contains(wide, "(1d16h)", "wide keeps the full 7d countdown")
+
+        # Tight: the second unit goes before the token counts do.
+        at80 = line2(80)
+        if "↑" not in at80:
+            raise AssertionError(
+                f"tokens outrank the countdown's second unit\nline2:\n{at80}")
+        assert_contains(at80, "(1h)", "80 falls back to one unit")
+
+        # Narrow: both gauges survive, the countdowns do not.
+        at40 = line2(40)
+        for want in ("5h:", "7d:"):
+            if want not in at40:
+                raise AssertionError(
+                    f"both quota gauges must outlive the countdown, missing "
+                    f"{want}\nline2:\n{at40}")
+        if "(" in at40:
+            raise AssertionError(
+                f"no countdown should survive at 40 columns\nline2:\n{at40}")
+
+
 def main():
     smoke_statusline_py()
     smoke_max_width_invalid()
@@ -1071,6 +1151,7 @@ def main():
     test_context_gauge_floor_from_ten_percent()
     test_quota_bar_floor_from_ten_percent()
     test_reset_countdown_shows_two_units()
+    test_countdown_sheds_before_a_quota_gauge()
     print("smoke tests passed")
 
 

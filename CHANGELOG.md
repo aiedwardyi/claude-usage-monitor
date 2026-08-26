@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Fixed
+- Narrow terminals now give up countdown detail instead of a whole quota gauge. The overflow loop drops entire segments, so at 40 columns the 5h gauge disappeared to protect eight characters of `(1d16h)`. The percentage is the number you act on, and it still tells you when you are nearly empty, so the countdown now sheds first: the second unit, then the countdown entirely, and only then does a segment go. At 40 columns both gauges now fit where one used to, and at 80 the token counts survive.
 - Reset countdowns now carry a second unit, so a 7d window resetting in 40h25m reads `(1d16h)` instead of `(1d)`. Flooring to a single unit gave the 7-day window seven possible values across seven days and understated the countdown by up to 23h, which reads as far less quota time than is actually left. The finer unit is dropped when it is zero, so exact boundaries stay `(2h)` / `(2d)`, and countdowns under an hour are unchanged.
 
 ## v0.2.0
