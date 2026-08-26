@@ -73,6 +73,11 @@ def copy_runtime_files(source_dir: Path, install_dir: Path) -> list[Path]:
     return copied
 
 
+# Reads the path from stdin so it is never parsed as bash source. See
+# _use_bash_launcher for why an argument is not safe here on Windows.
+PROBE_SCRIPT = 'IFS= read -r p; test -r "$p"'
+
+
 def _use_bash_launcher(install_dir: Path) -> bool:
     """Whether the installed statusLine launcher should run via bash.
 
@@ -98,6 +103,13 @@ def _use_bash_launcher(install_dir: Path) -> bool:
     script is readable tests the capability that matters instead of proxying
     it, and still rejects the distro-less WSL stub, which errors at
     invocation.
+
+    The path is fed on stdin rather than placed in the command, so a directory
+    name containing `$(...)`, a backtick, or a quote is read literally. It
+    cannot go in as an argument: Windows has no argv, so subprocess joins the
+    list into one command line that bash re-parses, and WSL's bash expands a
+    `$(...)` in it even from the `"$1"` position. Requires statusline.sh to
+    already exist in install_dir: call only after copy_runtime_files.
     """
     if os.name != "nt":
         return True
@@ -105,7 +117,8 @@ def _use_bash_launcher(install_dir: Path) -> bool:
         return False
     try:
         result = subprocess.run(
-            ["bash", "-c", f'test -f "{_bash_script_arg(install_dir)}"'],
+            ["bash", "-c", PROBE_SCRIPT],
+            input=(_bash_script_arg(install_dir) + "\n").encode(),
             capture_output=True,
             timeout=5,
         )

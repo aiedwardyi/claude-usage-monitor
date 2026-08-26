@@ -17,6 +17,17 @@ STATUSLINE_SH = ROOT / "statusline.sh"
 STATUSLINE_CMD = ROOT / "statusline.cmd"
 
 
+def _load_install():
+    # Reuse install.py's own path normalisation so the mirrored probe below
+    # cannot drift from the real gate.
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_install_under_test", INSTALL_PY)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _bash_launcher_expected(install_dir) -> bool:
     # Mirror install.py's _use_bash_launcher so end-to-end installer tests
     # expect whichever launcher form install.py will actually write for the
@@ -33,10 +44,11 @@ def _bash_launcher_expected(install_dir) -> bool:
         return True
     if not shutil.which("bash"):
         return False
-    sh_path = str(pathlib.Path(install_dir) / "statusline.sh").replace("\\", "/")
+    sh_path = _load_install()._bash_script_arg(pathlib.Path(install_dir))
     try:
         result = subprocess.run(
-            ["bash", "-c", f'test -f "{sh_path}"'],
+            ["bash", "-c", _load_install().PROBE_SCRIPT],
+            input=(sh_path + "\n").encode(),
             capture_output=True,
             timeout=5,
         )
@@ -1061,28 +1073,58 @@ def test_bash_probe_consults_the_installed_script():
     # `bash "C:/..."` command failed with "No such file or directory". The
     # probe now asks whether the installed script is readable, so a bash that
     # cannot see the install dir is rejected no matter why.
-    #
-    # On Windows any working bash answers False for a directory with no
-    # statusline.sh in it, and a host with no bash at all is False too, so the
-    # assertion holds on every Windows host. On posix the gate short-circuits
-    # to True before probing and there is nothing to pin.
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location("_install_under_test", INSTALL_PY)
-    install = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(install)
+    install = _load_install()
 
     with tempfile.TemporaryDirectory() as tmp:
-        empty = pathlib.Path(tmp) / "no-script-here"
-        empty.mkdir()
-        if os.name == "nt":
-            if install._use_bash_launcher(empty) is not False:
-                raise AssertionError(
-                    "bash gate must reject an install dir whose statusline.sh "
-                    "is unreadable by the bash that will run the command"
-                )
-        elif install._use_bash_launcher(empty) is not True:
-            raise AssertionError("posix must always use the bash launcher")
+        tmp_path = pathlib.Path(tmp)
+        target = tmp_path / "install-target"
+        target.mkdir()
+
+        if os.name != "nt":
+            if install._use_bash_launcher(target) is not True:
+                raise AssertionError("posix must always use the bash launcher")
+            return
+
+        # Whether the bash that will run the command can read a Windows path at
+        # all, measured on an unrelated file so it is not the gate's own answer
+        # fed back in. Git Bash can; WSL cannot, and that is the split this PR
+        # exists for, so the expected verdict below follows from it.
+        canary = tmp_path / "canary.txt"
+        canary.write_text("x", encoding="utf-8")
+        try:
+            bash_reads_windows_paths = subprocess.run(
+                ["bash", "-c", 'test -r "$1"', "bash", str(canary).replace(os.sep, "/")],
+                capture_output=True,
+                timeout=5,
+            ).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            bash_reads_windows_paths = False
+
+        # No statusline.sh yet: unreadable for every bash, so always declined.
+        if install._use_bash_launcher(target) is not False:
+            raise AssertionError(
+                "bash gate must reject an install dir with no statusline.sh"
+            )
+
+        # Script present: accepted exactly when that bash can actually read it.
+        # The old exit-0 probe answered True here even on WSL, which is the bug.
+        shutil.copy2(STATUSLINE_SH, target / "statusline.sh")
+        if install._use_bash_launcher(target) is not bash_reads_windows_paths:
+            raise AssertionError(
+                f"bash gate must track whether bash can read the script "
+                f"(bash reads Windows paths: {bash_reads_windows_paths})"
+            )
+
+        # A directory name carrying bash metacharacters must be tested
+        # literally. The verdict tracks readability like any other path; what
+        # must never happen is the path being expanded or executed.
+        tricky = tmp_path / "$(touch pwned)`x`"
+        tricky.mkdir()
+        shutil.copy2(STATUSLINE_SH, tricky / "statusline.sh")
+        if install._use_bash_launcher(tricky) is not bash_reads_windows_paths:
+            raise AssertionError(f"metacharacters in {tricky} changed the verdict")
+        if (tmp_path / "pwned").exists() or (tricky / "pwned").exists():
+            raise AssertionError("probe executed a command substitution from the path")
 
 
 def main():
