@@ -1118,7 +1118,8 @@ def test_countdown_sheds_before_a_quota_gauge():
         if "↑" not in at80:
             raise AssertionError(
                 f"tokens outrank the countdown's second unit\nline2:\n{at80}")
-        assert_contains(at80, "(1h)", "80 falls back to one unit")
+        assert_contains(at80, "(1h)", "80 falls back to one unit for 5h")
+        assert_contains(at80, "(1d)", "80 falls back to one unit for 7d")
 
         # Narrow: both gauges survive, the countdowns do not.
         at40 = line2(40)
