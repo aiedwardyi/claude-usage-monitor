@@ -73,21 +73,31 @@ def copy_runtime_files(source_dir: Path, install_dir: Path) -> list[Path]:
     return copied
 
 
-def _use_bash_launcher() -> bool:
+def _use_bash_launcher(install_dir: Path) -> bool:
     """Whether the installed statusLine launcher should run via bash.
 
-    On posix we always use bash. On Windows we use bash when a working bash
-    is on PATH so Claude Code installs that spawn statusLine through a
-    bash-style shell (e.g. Git Bash) still render. Hosts without a working
-    bash fall back to a direct `python.exe statusline.py` invocation via
-    `_windows_python_command`, because Claude Code on Windows cannot spawn
-    a `.cmd` file via the statusLine command field (its tokeniser parses
-    the field bash-style: backslashes are eaten as escapes, and `.cmd` is
-    not a PE binary).
+    On posix we always use bash. On Windows we use bash when the bash that
+    will actually run the command can read the installed script. Hosts where
+    it cannot fall back to a direct `python.exe statusline.py` invocation via
+    `_windows_python_command`, because Claude Code on Windows cannot spawn a
+    `.cmd` file via the statusLine command field (its tokeniser parses the
+    field bash-style: backslashes are eaten as escapes, and `.cmd` is not a
+    PE binary).
 
-    The probe (`bash -c "exit 0"`) is necessary because the WSL stub at
-    `C:\\Windows\\System32\\bash.exe` is on PATH on most modern Windows installs
-    but errors at invocation time when no Linux distro is installed.
+    The probe runs the installed script path through the same bare-name
+    `["bash", ...]` invocation the emitted command uses, because on Windows
+    `shutil.which("bash")` and `subprocess.run(["bash", ...])` can resolve to
+    different binaries: which() walks PATH, while CreateProcess searches
+    System32 first. A Git Bash on PATH therefore masks the WSL bash at
+    `C:\\Windows\\System32\\bash.exe` that actually runs the command.
+
+    Probing `test -f` rather than `exit 0` is what makes that safe. WSL runs
+    `exit 0` fine once a distro is installed, but cannot resolve a `C:/...`
+    path (it needs `/mnt/c/...`), so the old probe passed and the emitted
+    command then failed with "No such file or directory". Asking whether the
+    script is readable tests the capability that matters instead of proxying
+    it, and still rejects the distro-less WSL stub, which errors at
+    invocation.
     """
     if os.name != "nt":
         return True
@@ -95,7 +105,7 @@ def _use_bash_launcher() -> bool:
         return False
     try:
         result = subprocess.run(
-            ["bash", "-c", "exit 0"],
+            ["bash", "-c", f'test -f "{_bash_script_arg(install_dir)}"'],
             capture_output=True,
             timeout=5,
         )
@@ -190,7 +200,7 @@ def _windows_python_command(install_dir: Path) -> str:
 def build_status_command(install_dir: Path) -> str:
     # No posix fallback below: _use_bash_launcher() returns False only on
     # Windows, so the trailing python-command return always handles that case.
-    if _use_bash_launcher():
+    if _use_bash_launcher(install_dir):
         sh_arg = _bash_script_arg(install_dir)
         if os.name == "nt":
             # Hard-quote with double quotes so cmd / PowerShell parse the path
@@ -201,7 +211,7 @@ def build_status_command(install_dir: Path) -> str:
 
 
 def build_verify_command(install_dir: Path) -> str:
-    if _use_bash_launcher():
+    if _use_bash_launcher(install_dir):
         sh_arg = _bash_script_arg(install_dir)
         if os.name == "nt":
             return f'printf "" | bash "{sh_arg}"'
@@ -260,7 +270,7 @@ def verify_install(install_dir: Path) -> tuple[bool, str]:
     # the configured statusLine command would actually fail at runtime. Using
     # _bash_script_arg keeps the path normalisation identical to the command
     # we write, so verification and configuration can't silently diverge.
-    if _use_bash_launcher():
+    if _use_bash_launcher(install_dir):
         command = ["bash", _bash_script_arg(install_dir)]
     else:
         # No _to_posix here: the list form goes straight to the OS, not through

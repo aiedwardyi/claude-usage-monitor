@@ -17,22 +17,26 @@ STATUSLINE_SH = ROOT / "statusline.sh"
 STATUSLINE_CMD = ROOT / "statusline.cmd"
 
 
-def _bash_launcher_expected() -> bool:
+def _bash_launcher_expected(install_dir) -> bool:
     # Mirror install.py's _use_bash_launcher so end-to-end installer tests
     # expect whichever launcher form install.py will actually write for the
     # current host. On posix this is always True; on Windows it requires a
-    # bash on PATH whose `bash -c "exit 0"` probe succeeds (so the WSL stub
-    # without a Linux distro installed is correctly classified as unusable).
-    # When False on Windows, the installer falls back to a direct
-    # `python.exe statusline.py` command (not `.cmd`) because Claude Code's
-    # statusLine spawn can't execute `.cmd` files.
+    # bash on PATH that can read the installed statusline.sh through the same
+    # bare-name ["bash", ...] invocation the emitted command uses. That last
+    # part matters: shutil.which() walks PATH while CreateProcess searches
+    # System32 first, so a Git Bash on PATH can mask the WSL bash that runs
+    # the command, and WSL cannot resolve a C:/... path. When False on
+    # Windows, the installer falls back to a direct `python.exe statusline.py`
+    # command (not `.cmd`) because Claude Code's statusLine spawn can't
+    # execute `.cmd` files.
     if os.name != "nt":
         return True
     if not shutil.which("bash"):
         return False
+    sh_path = str(pathlib.Path(install_dir) / "statusline.sh").replace("\\", "/")
     try:
         result = subprocess.run(
-            ["bash", "-c", "exit 0"],
+            ["bash", "-c", f'test -f "{sh_path}"'],
             capture_output=True,
             timeout=5,
         )
@@ -263,7 +267,7 @@ def smoke_installer():
         # a direct `python.exe statusline.py` command otherwise. Use the
         # same helper install.py uses so CI runners where `bash` on PATH is
         # a broken WSL stub expect the python fallback.
-        expected_fragment = "statusline.sh" if _bash_launcher_expected() else "statusline.py"
+        expected_fragment = "statusline.sh" if _bash_launcher_expected(install_dir) else "statusline.py"
         if expected_fragment not in command:
             raise AssertionError(f"unexpected installed command: {command}")
         if os.name == "nt" and "\\" in command:
@@ -338,7 +342,7 @@ def smoke_windows_install_wrapper():
 
         settings = json.loads(settings_path.read_text(encoding="utf-8"))
         command = settings.get("statusLine", {}).get("command", "")
-        expected_fragment = "statusline.sh" if _bash_launcher_expected() else "statusline.py"
+        expected_fragment = "statusline.sh" if _bash_launcher_expected(install_dir) else "statusline.py"
         if expected_fragment not in command:
             raise AssertionError(f"unexpected install.ps1 command: {command}")
 
@@ -991,6 +995,37 @@ def test_quota_bar_floor_from_ten_percent():
             )
 
 
+def test_bash_probe_consults_the_installed_script():
+    # The Windows gate used to probe `bash -c "exit 0"`, which only rejects the
+    # distro-less WSL stub. With a distro installed WSL runs `exit 0` fine but
+    # still cannot resolve a C:/... path, so the gate passed and the emitted
+    # `bash "C:/..."` command failed with "No such file or directory". The
+    # probe now asks whether the installed script is readable, so a bash that
+    # cannot see the install dir is rejected no matter why.
+    #
+    # On Windows any working bash answers False for a directory with no
+    # statusline.sh in it, and a host with no bash at all is False too, so the
+    # assertion holds on every Windows host. On posix the gate short-circuits
+    # to True before probing and there is nothing to pin.
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_install_under_test", INSTALL_PY)
+    install = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(install)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        empty = pathlib.Path(tmp) / "no-script-here"
+        empty.mkdir()
+        if os.name == "nt":
+            if install._use_bash_launcher(empty) is not False:
+                raise AssertionError(
+                    "bash gate must reject an install dir whose statusline.sh "
+                    "is unreadable by the bash that will run the command"
+                )
+        elif install._use_bash_launcher(empty) is not True:
+            raise AssertionError("posix must always use the bash launcher")
+
+
 def main():
     smoke_statusline_py()
     smoke_max_width_invalid()
@@ -1003,6 +1038,7 @@ def main():
     smoke_windows_install_pipe()
     smoke_build_status_command()
     smoke_windows_python_command_unsafe_path_guard()
+    test_bash_probe_consults_the_installed_script()
     smoke_bar_toggle()
     smoke_remaining_toggle()
     smoke_overflow()

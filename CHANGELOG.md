@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- Windows hosts with WSL installed no longer get a `bash "C:/..."` statusLine command that cannot run. `shutil.which("bash")` walks `PATH` while `CreateProcess` searches `System32` first, so a Git Bash on `PATH` masked the WSL bash at `C:\\Windows\\System32\\bash.exe` that actually ran the command. The old `bash -c "exit 0"` probe only rejected the distro-less WSL stub: with a distro installed it returned 0, the gate passed, and the emitted command then failed with `No such file or directory` because WSL cannot resolve a `C:/...` path (it needs `/mnt/c/...`). The installer wrote that command into `settings.json` before the launcher check ran, so the install exited 1 but left the broken command behind, and anyone who restarted Claude Code past the error got a blank statusline. The probe now checks that the installed `statusline.sh` is readable through the same bare-name `["bash", ...]` invocation the emitted command uses, so affected hosts fall back to the direct `python.exe statusline.py` command that already works.
+
 ## v0.2.0
 
 ### Added
