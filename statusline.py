@@ -50,12 +50,21 @@ SHOW_COST = os.environ.get("CQB_COST", "0") == "1"
 SHOW_REMAINING = os.environ.get("CQB_REMAINING", "1") == "1"
 SHOW_BAR = os.environ.get("CQB_BAR", "1") == "1"
 SHOW_EMAIL = os.environ.get("CQB_EMAIL", "0") == "1"
-# Defensive: empty/non-numeric/non-positive CQB_MAX_WIDTH -> 80 (never blank the statusline).
-try:
-    MAX_WIDTH = int(os.environ.get("CQB_MAX_WIDTH", "80"))
-    MAX_WIDTH = MAX_WIDTH if MAX_WIDTH > 0 else 80
-except (TypeError, ValueError):
-    MAX_WIDTH = 80
+# Width budget: an explicit CQB_MAX_WIDTH first, then the real terminal width
+# Claude Code exports as COLUMNS, then 80 for Claude Code older than v2.1.153,
+# which does not set it. COLUMNS is the only source available: our stdout is
+# captured rather than attached to the tty, so tput and get_terminal_size()
+# both report a fallback size instead of the terminal's. Each candidate is
+# skipped when empty, non-numeric, or non-positive (never blank the line).
+MAX_WIDTH = 80
+for _candidate in (os.environ.get("CQB_MAX_WIDTH"), os.environ.get("COLUMNS")):
+    try:
+        _width = int(_candidate)
+    except (TypeError, ValueError):
+        continue
+    if _width > 0:
+        MAX_WIDTH = _width
+        break
 
 # ── Read stdin ──────────────────────────────────────────────────
 raw = sys.stdin.read().strip()

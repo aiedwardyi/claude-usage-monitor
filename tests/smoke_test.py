@@ -17,28 +17,23 @@ STATUSLINE_SH = ROOT / "statusline.sh"
 STATUSLINE_CMD = ROOT / "statusline.cmd"
 
 
-def _bash_launcher_expected() -> bool:
-    # Mirror install.py's _use_bash_launcher so end-to-end installer tests
-    # expect whichever launcher form install.py will actually write for the
-    # current host. On posix this is always True; on Windows it requires a
-    # bash on PATH whose `bash -c "exit 0"` probe succeeds (so the WSL stub
-    # without a Linux distro installed is correctly classified as unusable).
-    # When False on Windows, the installer falls back to a direct
-    # `python.exe statusline.py` command (not `.cmd`) because Claude Code's
-    # statusLine spawn can't execute `.cmd` files.
-    if os.name != "nt":
-        return True
-    if not shutil.which("bash"):
-        return False
-    try:
-        result = subprocess.run(
-            ["bash", "-c", "exit 0"],
-            capture_output=True,
-            timeout=5,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return result.returncode == 0
+def _load_install():
+    # Reuse install.py's own path normalisation so the mirrored probe below
+    # cannot drift from the real gate.
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_install_under_test", INSTALL_PY)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _bash_launcher_expected(install_dir) -> bool:
+    # Ask install.py itself which launcher form it will write for this host, so
+    # the end-to-end assertions cannot drift from the real gate. Whether that
+    # gate is correct is pinned separately, by
+    # test_bash_probe_consults_the_installed_script.
+    return _load_install()._use_bash_launcher(pathlib.Path(install_dir))
 
 
 def run(command, stdin_text="", extra_env=None):
@@ -49,6 +44,10 @@ def run(command, stdin_text="", extra_env=None):
     # specific settings via the explicit defaults below and extra_env.
     for key in [k for k in env if k.startswith("CQB_")]:
         del env[key]
+    # COLUMNS feeds MAX_WIDTH the same way CQB_MAX_WIDTH does, so a developer
+    # shell that exports it would otherwise re-render every default-mode
+    # assertion at the terminal's width. Tests that care pass it explicitly.
+    env.pop("COLUMNS", None)
     env["CQB_TOKENS"] = "0"
     env["CQB_RESET"] = "0"
     env["CQB_DURATION"] = "0"
@@ -263,7 +262,7 @@ def smoke_installer():
         # a direct `python.exe statusline.py` command otherwise. Use the
         # same helper install.py uses so CI runners where `bash` on PATH is
         # a broken WSL stub expect the python fallback.
-        expected_fragment = "statusline.sh" if _bash_launcher_expected() else "statusline.py"
+        expected_fragment = "statusline.sh" if _bash_launcher_expected(install_dir) else "statusline.py"
         if expected_fragment not in command:
             raise AssertionError(f"unexpected installed command: {command}")
         if os.name == "nt" and "\\" in command:
@@ -338,7 +337,7 @@ def smoke_windows_install_wrapper():
 
         settings = json.loads(settings_path.read_text(encoding="utf-8"))
         command = settings.get("statusLine", {}).get("command", "")
-        expected_fragment = "statusline.sh" if _bash_launcher_expected() else "statusline.py"
+        expected_fragment = "statusline.sh" if _bash_launcher_expected(install_dir) else "statusline.py"
         if expected_fragment not in command:
             raise AssertionError(f"unexpected install.ps1 command: {command}")
 
@@ -1052,6 +1051,150 @@ def test_reset_countdown_shows_two_units():
             assert_contains(ansi_re.sub("", d7), want7, f"7d reset {min7}m -> {want7}")
 
 
+def test_bash_probe_consults_the_installed_script():
+    # The Windows gate used to probe `bash -c "exit 0"`, which only rejects the
+    # distro-less WSL stub. With a distro installed WSL runs `exit 0` fine but
+    # still cannot resolve a C:/... path, so the gate passed and the emitted
+    # `bash "C:/..."` command failed with "No such file or directory". The
+    # probe now asks whether the installed script is readable, so a bash that
+    # cannot see the install dir is rejected no matter why.
+    install = _load_install()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = pathlib.Path(tmp)
+        target = tmp_path / "install-target"
+        target.mkdir()
+
+        if os.name != "nt":
+            if install._use_bash_launcher(target) is not True:
+                raise AssertionError("posix must always use the bash launcher")
+            return
+
+        # Whether the bash that will run the command can read a Windows path at
+        # all, measured on an unrelated file so it is not the gate's own answer
+        # fed back in. Git Bash can; WSL cannot, and that is the split this PR
+        # exists for, so the expected verdict below follows from it.
+        canary = tmp_path / "canary.txt"
+        canary.write_text("x", encoding="utf-8")
+        try:
+            bash_reads_windows_paths = subprocess.run(
+                ["bash", "-c", install.PROBE_SCRIPT],
+                input=(str(canary).replace(os.sep, "/") + "\n").encode(),
+                capture_output=True,
+                timeout=5,
+            ).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            bash_reads_windows_paths = False
+
+        # No statusline.sh yet: unreadable for every bash, so always declined.
+        if install._use_bash_launcher(target) is not False:
+            raise AssertionError(
+                "bash gate must reject an install dir with no statusline.sh"
+            )
+
+        # Script present: accepted exactly when that bash can actually read it.
+        # The old exit-0 probe answered True here even on WSL, which is the bug.
+        shutil.copy2(STATUSLINE_SH, target / "statusline.sh")
+        if install._use_bash_launcher(target) is not bash_reads_windows_paths:
+            raise AssertionError(
+                f"bash gate must track whether bash can read the script "
+                f"(bash reads Windows paths: {bash_reads_windows_paths})"
+            )
+
+        # A directory name carrying bash metacharacters must be tested
+        # literally. The verdict tracks readability like any other path; what
+        # must never happen is the path being expanded or executed.
+        tricky = tmp_path / "$(touch pwned)`x`"
+        tricky.mkdir()
+        shutil.copy2(STATUSLINE_SH, tricky / "statusline.sh")
+        if install._use_bash_launcher(tricky) is not bash_reads_windows_paths:
+            raise AssertionError(f"metacharacters in {tricky} changed the verdict")
+        if (tmp_path / "pwned").exists() or (tricky / "pwned").exists():
+            raise AssertionError("probe executed a command substitution from the path")
+def test_width_follows_the_real_terminal():
+    # MAX_WIDTH was hardcoded to 80, so a 98-column terminal lost 18 columns
+    # and the overflow loop deleted priority-4 segments (tokens, cost) that
+    # would have fitted. Claude Code sets COLUMNS to the real terminal width
+    # before running the script (tput/get_terminal_size cannot see it, because
+    # our stdout is captured rather than attached to the tty), so read that.
+    # CQB_MAX_WIDTH still wins when set, and 80 remains the fallback for
+    # Claude Code older than v2.1.153, which does not set COLUMNS.
+    import re
+    import time as _time
+
+    payload = {
+        "model": {"display_name": "Opus"},
+        "context_window": {
+            "used_percentage": 18,
+            "context_window_size": 1000000,
+            "total_input_tokens": 217731,
+            "total_output_tokens": 12400,
+        },
+        "cost": {"total_cost_usd": 0, "total_duration_ms": 2148000},
+        "workspace": {"project_dir": str(ROOT)},
+    }
+    stdin = json.dumps(payload)
+    ansi_re = re.compile(r"\033\[[0-9;]*m")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        cache_file = os.path.join(tmp, "test-cache.json")
+        pathlib.Path(cache_file).write_text(json.dumps({
+            "five_hour_used": 16,
+            "seven_day_used": 44,
+            "five_hour_reset_min": 79,
+            "seven_day_reset_min": 2355,
+            "extra_enabled": False,
+            "extra_used": 0,
+            "extra_limit": 0,
+            "fetched_at": _time.time() + 30,
+        }), encoding="utf-8")
+
+        def line2(extra):
+            env = {"CQB_CACHE_PATH": cache_file, "CQB_RESET": "1",
+                   "CQB_TOKENS": "1", "CQB_DURATION": "1"}
+            env.update(extra)
+            proc = run([sys.executable, str(STATUSLINE_PY)], stdin, extra_env=env)
+            assert_ok(proc, "terminal width")
+            return ansi_re.sub("", proc.stdout.splitlines()[1])
+
+        # A 98-column terminal fits the whole line; nothing may be dropped.
+        wide = line2({"COLUMNS": "98"})
+        if "↑" not in wide:
+            raise AssertionError(
+                f"COLUMNS=98 has room for the token counts\nline2:\n{wide}")
+        if len(wide) > 98:
+            raise AssertionError(f"line2 must fit COLUMNS: {len(wide)}\n{wide}")
+
+        # A narrow terminal must still shed segments rather than overflow.
+        narrow = line2({"COLUMNS": "60"})
+        if len(narrow) > 60:
+            raise AssertionError(f"line2 must fit COLUMNS=60: {len(narrow)}\n{narrow}")
+
+        # CQB_MAX_WIDTH stays authoritative over COLUMNS.
+        pinned = line2({"COLUMNS": "200", "CQB_MAX_WIDTH": "60"})
+        if len(pinned) > 60:
+            raise AssertionError(
+                f"CQB_MAX_WIDTH must win over COLUMNS: {len(pinned)}\n{pinned}")
+
+        # No COLUMNS (Claude Code < 2.1.153) keeps the historical 80.
+        fallback = line2({"COLUMNS": ""})
+        if len(fallback) > 80:
+            raise AssertionError(
+                f"missing COLUMNS must fall back to 80: {len(fallback)}\n{fallback}")
+
+        # An unusable CQB_MAX_WIDTH falls through to COLUMNS, not straight to 80.
+        for junk in ("foo", "", "0", "-5"):
+            fell_through = line2({"COLUMNS": "60", "CQB_MAX_WIDTH": junk})
+            if len(fell_through) > 60:
+                raise AssertionError(
+                    f"CQB_MAX_WIDTH={junk!r} must fall through to COLUMNS=60: "
+                    f"{len(fell_through)}\n{fell_through}")
+            if fell_through != narrow:
+                raise AssertionError(
+                    f"CQB_MAX_WIDTH={junk!r} must render as plain COLUMNS=60"
+                    f"\ngot:  {fell_through}\nwant: {narrow}")
+
+
 def test_countdown_sheds_before_a_quota_gauge():
     # The overflow loop drops whole segments, so a narrow terminal paid an
     # entire quota window to keep eight characters of countdown: at 40 columns
@@ -1145,6 +1288,7 @@ def main():
     smoke_windows_install_pipe()
     smoke_build_status_command()
     smoke_windows_python_command_unsafe_path_guard()
+    test_bash_probe_consults_the_installed_script()
     smoke_bar_toggle()
     smoke_remaining_toggle()
     smoke_overflow()
@@ -1153,6 +1297,7 @@ def main():
     test_quota_bar_floor_from_ten_percent()
     test_reset_countdown_shows_two_units()
     test_countdown_sheds_before_a_quota_gauge()
+    test_width_follows_the_real_terminal()
     print("smoke tests passed")
 
 
