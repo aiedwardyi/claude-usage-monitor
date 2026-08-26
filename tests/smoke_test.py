@@ -995,6 +995,65 @@ def test_quota_bar_floor_from_ten_percent():
             )
 
 
+def test_reset_countdown_shows_two_units():
+    # format_reset() floored to a single unit, so a 7d window resetting in
+    # 40h25m rendered as "(1d)" - read as "one day left" with nearly two still
+    # there. Same shape as the bar/percent mismatches: the number shown didn't
+    # match the truth. The countdown now carries a second unit, and drops it
+    # when it is zero so exact boundaries stay "(2h)" / "(2d)".
+    import re
+    import time as _time
+
+    payload = {
+        "model": {"display_name": "Opus"},
+        "context_window": {
+            "used_percentage": 25,
+            "context_window_size": 200000,
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+        },
+        "cost": {"total_cost_usd": 0, "total_duration_ms": 0},
+        "workspace": {"project_dir": str(ROOT)},
+    }
+    stdin = json.dumps(payload)
+    ansi_re = re.compile(r"\033\[[0-9;]*m")
+
+    # min5, min7, expected 5h countdown, expected 7d countdown
+    cases = [
+        (115, 2425, "(1h55m)", "(1d16h)"),   # the reported case: 1h55m / 40h25m
+        (120, 2880, "(2h)", "(2d)"),         # exact boundaries keep one unit
+        (45, 1499, "(45m)", "(1d)"),         # minutes branch unchanged; days branch still hides sub-hour (59m here)
+        (299, 10079, "(4h59m)", "(6d23h)"),  # widest render each window allows
+    ]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        cache_file = os.path.join(tmp, "test-cache.json")
+        for min5, min7, want5, want7 in cases:
+            # fetched_at is set ahead so read_cached_usage()'s elapsed-since-fetch
+            # adjustment (int(r - elapsed_min)) cannot shave a minute off between
+            # write and spawn and make the boundary cases flaky. A future
+            # fetched_at also reads as fresh, so no network fetch is attempted.
+            pathlib.Path(cache_file).write_text(json.dumps({
+                "five_hour_used": 20,
+                "seven_day_used": 40,
+                "five_hour_reset_min": min5,
+                "seven_day_reset_min": min7,
+                "extra_enabled": False,
+                "extra_used": 0,
+                "extra_limit": 0,
+                "fetched_at": _time.time() + 30,
+            }), encoding="utf-8")
+
+            proc = run(
+                [sys.executable, str(STATUSLINE_PY)],
+                stdin,
+                extra_env={"CQB_CACHE_PATH": cache_file, "CQB_RESET": "1"},
+            )
+            assert_ok(proc, f"reset countdown ({min5}m/{min7}m)")
+            # Line 2 is "context | 5h | 7d" (run() disables tokens/duration/branch).
+            ctx, h5, d7 = proc.stdout.splitlines()[1].split("│")
+            assert_contains(ansi_re.sub("", h5), want5, f"5h reset {min5}m -> {want5}")
+            assert_contains(ansi_re.sub("", d7), want7, f"7d reset {min7}m -> {want7}")
 def test_bash_probe_consults_the_installed_script():
     # The Windows gate used to probe `bash -c "exit 0"`, which only rejects the
     # distro-less WSL stub. With a distro installed WSL runs `exit 0` fine but
@@ -1045,6 +1104,7 @@ def main():
     smoke_clamp_percent()
     test_context_gauge_floor_from_ten_percent()
     test_quota_bar_floor_from_ten_percent()
+    test_reset_countdown_shows_two_units()
     print("smoke tests passed")
 
 
