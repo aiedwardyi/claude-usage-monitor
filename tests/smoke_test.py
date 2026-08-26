@@ -29,33 +29,11 @@ def _load_install():
 
 
 def _bash_launcher_expected(install_dir) -> bool:
-    # Mirror install.py's _use_bash_launcher so end-to-end installer tests
-    # expect whichever launcher form install.py will actually write for the
-    # current host. On posix this is always True; on Windows it requires a
-    # bash on PATH that can read the installed statusline.sh through the same
-    # bare-name ["bash", ...] invocation the emitted command uses. That last
-    # part matters: shutil.which() walks PATH while CreateProcess searches
-    # System32 first, so a Git Bash on PATH can mask the WSL bash that runs
-    # the command, and WSL cannot resolve a C:/... path. When False on
-    # Windows, the installer falls back to a direct `python.exe statusline.py`
-    # command (not `.cmd`) because Claude Code's statusLine spawn can't
-    # execute `.cmd` files.
-    if os.name != "nt":
-        return True
-    if not shutil.which("bash"):
-        return False
-    install = _load_install()
-    sh_path = install._bash_script_arg(pathlib.Path(install_dir))
-    try:
-        result = subprocess.run(
-            ["bash", "-c", install.PROBE_SCRIPT],
-            input=(sh_path + "\n").encode(),
-            capture_output=True,
-            timeout=5,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return result.returncode == 0
+    # Ask install.py itself which launcher form it will write for this host, so
+    # the end-to-end assertions cannot drift from the real gate. Whether that
+    # gate is correct is pinned separately, by
+    # test_bash_probe_consults_the_installed_script.
+    return _load_install()._use_bash_launcher(pathlib.Path(install_dir))
 
 
 def run(command, stdin_text="", extra_env=None):
