@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.2
+
+### Fixed
+- Plans without a 5h window no longer freeze the gauges. The usage API returns `"five_hour": null` for them, which made every refresh raise, so the cache kept its last numbers indefinitely. The 5h gauge is now hidden when the plan has none, and a missing 7d window renders as `--` (#34)
+- A failed usage fetch now waits 5 minutes before retrying instead of retrying on every render, which kept a 429 going across open sessions. The last error is written to `<cache>.err` (#34)
+
 ## v0.2.1
 
 ### Fixed
