@@ -363,13 +363,13 @@ def fetch_usage_sync():
             except Exception:
                 return None
 
-        # Plans without a 5h window send "five_hour": null, so never .get() on it.
+        # Plans without a 5h window send "five_hour": null; null or {} hides the gauge.
         five = data.get("five_hour") or {}
         seven = data.get("seven_day") or {}
         extra = data.get("extra_usage") or {}
         cache_data = {
             "five_hour_used": five.get("utilization"),
-            "seven_day_used": seven.get("utilization", 0),
+            "seven_day_used": seven.get("utilization"),
             "five_hour_reset_min": parse_reset_minutes(five.get("resets_at")),
             "seven_day_reset_min": parse_reset_minutes(seven.get("resets_at")),
             "extra_enabled": extra.get("is_enabled", False),

@@ -1279,29 +1279,46 @@ def test_countdown_sheds_before_a_quota_gauge():
 def test_missing_5h_window_hides_its_gauge():
     # Plans without a 5h window get "five_hour": null; the old .get() chain
     # raised on it, so the cache never refreshed and the gauges froze.
-    import time as _time
-
     payload = {
         "model": {"display_name": "Opus"},
         "context_window": {"used_percentage": 18, "context_window_size": 1000000},
         "cost": {"total_cost_usd": 0, "total_duration_ms": 1000},
     }
+    api_body = {
+        "five_hour": None,
+        "seven_day": {"utilization": 41, "resets_at": "2099-01-01T00:00:00Z"},
+    }
+    # Runs the real fetch against a stubbed urlopen, so no network is touched.
+    driver = (
+        "import json, runpy, sys, urllib.request\n"
+        "class Resp:\n"
+        "    def __enter__(self): return self\n"
+        "    def __exit__(self, *a): return False\n"
+        "    def read(self): return sys.argv[2].encode()\n"
+        "urllib.request.urlopen = lambda *a, **k: Resp()\n"
+        "runpy.run_path(sys.argv[1], run_name='__main__')\n"
+    )
     with tempfile.TemporaryDirectory() as tmp:
         cache_file = os.path.join(tmp, "test-cache.json")
-        pathlib.Path(cache_file).write_text(json.dumps({
-            "five_hour_used": None,
-            "seven_day_used": 41,
-            "five_hour_reset_min": None,
-            "seven_day_reset_min": 2425,
-            "fetched_at": _time.time() + 30,
-        }), encoding="utf-8")
+        env = {"CQB_CACHE_PATH": cache_file, "CQB_RESET": "1",
+               "CQB_REMAINING": "1", "CLAUDE_CODE_OAUTH_TOKEN": "stub"}
+        proc = run(
+            [sys.executable, "-c", driver, str(STATUSLINE_PY), json.dumps(api_body)],
+            json.dumps(payload),
+            extra_env=env,
+        )
+        assert_ok(proc, "fetch with no 5h window")
+        if not os.path.exists(cache_file):
+            raise AssertionError("fetch with null five_hour wrote no cache")
+        cache = json.loads(pathlib.Path(cache_file).read_text(encoding="utf-8"))
+        if cache["five_hour_used"] is not None or cache["seven_day_used"] != 41:
+            raise AssertionError(f"null five_hour must cache as None\n{cache}")
 
         def line2(width):
             proc = run(
                 [sys.executable, str(STATUSLINE_PY)],
                 json.dumps(payload),
-                extra_env={"CQB_CACHE_PATH": cache_file, "CQB_RESET": "1",
-                           "CQB_MAX_WIDTH": str(width)},
+                extra_env={**env, "CQB_MAX_WIDTH": str(width)},
             )
             assert_ok(proc, f"no 5h window at {width}")
             return proc.stdout.splitlines()[1]
@@ -1335,7 +1352,9 @@ def test_failed_fetch_backs_off():
                 extra_env={"CQB_CACHE_PATH": cache_file,
                            "CLAUDE_CODE_OAUTH_TOKEN": "invalid",
                            "HTTPS_PROXY": "http://127.0.0.1:9",
-                           "NO_PROXY": ""},
+                           "https_proxy": "http://127.0.0.1:9",
+                           "NO_PROXY": "",
+                           "no_proxy": ""},
             )
             assert_ok(proc, "backoff")
             return err_file.read_text(encoding="utf-8") if err_file.exists() else ""
