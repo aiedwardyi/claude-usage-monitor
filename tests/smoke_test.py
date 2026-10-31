@@ -1276,6 +1276,80 @@ def test_countdown_sheds_before_a_quota_gauge():
                 f"no countdown should survive at 40 columns\nline2:\n{at40}")
 
 
+def test_missing_5h_window_hides_its_gauge():
+    # Plans without a 5h window get "five_hour": null; the old .get() chain
+    # raised on it, so the cache never refreshed and the gauges froze.
+    import time as _time
+
+    payload = {
+        "model": {"display_name": "Opus"},
+        "context_window": {"used_percentage": 18, "context_window_size": 1000000},
+        "cost": {"total_cost_usd": 0, "total_duration_ms": 1000},
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        cache_file = os.path.join(tmp, "test-cache.json")
+        pathlib.Path(cache_file).write_text(json.dumps({
+            "five_hour_used": None,
+            "seven_day_used": 41,
+            "five_hour_reset_min": None,
+            "seven_day_reset_min": 2425,
+            "fetched_at": _time.time() + 30,
+        }), encoding="utf-8")
+
+        def line2(width):
+            proc = run(
+                [sys.executable, str(STATUSLINE_PY)],
+                json.dumps(payload),
+                extra_env={"CQB_CACHE_PATH": cache_file, "CQB_RESET": "1",
+                           "CQB_MAX_WIDTH": str(width)},
+            )
+            assert_ok(proc, f"no 5h window at {width}")
+            return proc.stdout.splitlines()[1]
+
+        for width in (120, 40):
+            out = line2(width)
+            if "5h:" in out:
+                raise AssertionError(f"plan without a 5h window must hide it\n{out!r}")
+            assert_contains(out, "59%", f"7d gauge survives at {width}")
+
+
+def test_failed_fetch_backs_off():
+    # Every render used to retry a failing fetch, which kept a 429 going.
+    import time as _time
+
+    payload = {"model": {"display_name": "Opus"}, "context_window": {}}
+    with tempfile.TemporaryDirectory() as tmp:
+        cache_file = os.path.join(tmp, "test-cache.json")
+        pathlib.Path(cache_file).write_text(json.dumps({
+            "five_hour_used": 10,
+            "seven_day_used": 41,
+            "fetched_at": _time.time() - 3600,
+        }), encoding="utf-8")
+        err_file = pathlib.Path(cache_file + ".err")
+
+        def render():
+            # Dead proxy: any fetch fails fast and offline, and records why.
+            proc = run(
+                [sys.executable, str(STATUSLINE_PY)],
+                json.dumps(payload),
+                extra_env={"CQB_CACHE_PATH": cache_file,
+                           "CLAUDE_CODE_OAUTH_TOKEN": "invalid",
+                           "HTTPS_PROXY": "http://127.0.0.1:9",
+                           "NO_PROXY": ""},
+            )
+            assert_ok(proc, "backoff")
+            return err_file.read_text(encoding="utf-8") if err_file.exists() else ""
+
+        err_file.write_text("marker\n", encoding="utf-8")
+        if render() != "marker\n":
+            raise AssertionError("a fresh failure must hold off the next fetch")
+
+        old = _time.time() - 3600
+        os.utime(err_file, (old, old))
+        if render() in ("", "marker\n"):
+            raise AssertionError("an old failure must allow a retry, and record it")
+
+
 def main():
     smoke_statusline_py()
     smoke_max_width_invalid()
@@ -1298,6 +1372,8 @@ def main():
     test_reset_countdown_shows_two_units()
     test_countdown_sheds_before_a_quota_gauge()
     test_width_follows_the_real_terminal()
+    test_missing_5h_window_hides_its_gauge()
+    test_failed_fetch_backs_off()
     print("smoke tests passed")
 
 
