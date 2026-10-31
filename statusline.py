@@ -284,6 +284,7 @@ CACHE_FILE = os.environ.get(
 )
 CACHE_TTL = 300  # 5 minutes
 LOCK_FILE = CACHE_FILE + ".lock"
+ERR_FILE = CACHE_FILE + ".err"  # last fetch failure; its mtime also backs off retries
 
 
 def get_oauth_token():
@@ -362,14 +363,18 @@ def fetch_usage_sync():
             except Exception:
                 return None
 
+        # Plans without a 5h window send "five_hour": null; null or {} hides the gauge.
+        five = data.get("five_hour") or {}
+        seven = data.get("seven_day") or {}
+        extra = data.get("extra_usage") or {}
         cache_data = {
-            "five_hour_used": data.get("five_hour", {}).get("utilization", 0),
-            "seven_day_used": data.get("seven_day", {}).get("utilization", 0),
-            "five_hour_reset_min": parse_reset_minutes(data.get("five_hour", {}).get("resets_at")),
-            "seven_day_reset_min": parse_reset_minutes(data.get("seven_day", {}).get("resets_at")),
-            "extra_enabled": data.get("extra_usage", {}).get("is_enabled", False),
-            "extra_used": data.get("extra_usage", {}).get("used_credits", 0),
-            "extra_limit": data.get("extra_usage", {}).get("monthly_limit", 0),
+            "five_hour_used": five.get("utilization"),
+            "seven_day_used": seven.get("utilization"),
+            "five_hour_reset_min": parse_reset_minutes(five.get("resets_at")),
+            "seven_day_reset_min": parse_reset_minutes(seven.get("resets_at")),
+            "extra_enabled": extra.get("is_enabled", False),
+            "extra_used": extra.get("used_credits", 0),
+            "extra_limit": extra.get("monthly_limit", 0),
             "fetched_at": time.time(),
         }
 
@@ -377,9 +382,18 @@ def fetch_usage_sync():
         with open(tmp, "w") as f:
             json.dump(cache_data, f)
         os.replace(tmp, CACHE_FILE)
+        try:
+            os.unlink(ERR_FILE)
+        except OSError:
+            pass
 
-    except Exception:
-        pass  # Intentional: statusline must never fail visibly
+    except Exception as e:
+        # Never fail visibly; record why so a frozen gauge can be explained.
+        try:
+            with open(ERR_FILE, "w") as f:
+                f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {type(e).__name__}: {e}\n")
+        except OSError:
+            pass
     finally:
         try:
             os.unlink(LOCK_FILE)
@@ -404,8 +418,13 @@ def read_cached_usage():
     now = time.time()
     fetched_at = (cache or {}).get("fetched_at", 0)
     is_stale = (now - fetched_at) > CACHE_TTL
+    try:
+        # Without this every render retries a failing fetch, which keeps a 429 going.
+        backing_off = (now - os.path.getmtime(ERR_FILE)) < CACHE_TTL
+    except OSError:
+        backing_off = False
 
-    if is_stale:
+    if is_stale and not backing_off:
         # Try to acquire lock (non-blocking)
         try:
             fd = os.open(LOCK_FILE, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
@@ -508,14 +527,17 @@ if usage:
     reset5 = format_reset(r5) if SHOW_RESET else ""
     reset7 = format_reset(r7) if SHOW_RESET else ""
 
-    quota_at = (len(line2_segments), len(line2_segments) + 1)
-    line2_segments.append((quota5 + reset5, 1))
-    line2_segments.append((quota7 + reset7, 1))
+    shown = [(quota5, reset5, r5), (quota7, reset7, r7)]
+    if u5 is None:
+        shown = shown[1:]  # plan has no 5h window
+    start = len(line2_segments)
+    quota_at = tuple(range(start, start + len(shown)))
+    for text, reset, _ in shown:
+        line2_segments.append((text + reset, 1))
     if SHOW_RESET:
         quota_fallbacks = [
-            (quota5 + format_reset(r5, compact=True),
-             quota7 + format_reset(r7, compact=True)),
-            (quota5, quota7),
+            tuple(text + format_reset(r, compact=True) for text, _, r in shown),
+            tuple(text for text, _, _ in shown),
         ]
 else:
     if not get_oauth_token():
