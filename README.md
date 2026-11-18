@@ -258,6 +258,10 @@ Issues and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.
 
 If this is useful to you, a star helps others find it.
 
+## Also by me
+
+[Wink](https://getwink.dev) is a free, open-source Windows app where one orchestrator runs Claude Code, Codex, Grok, Gemini and Muse agents in real terminals. Source on [GitHub](https://github.com/aiedwardyi/Wink).
+
 ## License
 
 MIT
